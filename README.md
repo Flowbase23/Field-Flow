@@ -144,6 +144,11 @@ moved accordingly.
   then `bun install`. `/var/tmp/ff-nm/node_modules` is a self-symlink needed for
   Node-based CLIs (prisma, next) to resolve packages under bun's flat layout —
   re-create with `cd /var/tmp/ff-nm && ln -s . node_modules` if it disappears.
+  `/var/tmp/node_modules -> /var/tmp/ff-nm` is required for `next build`'s
+  page-data phase (built pages live under the symlinked `.next`); the build
+  wipes `.next` each run, so the symlink must live in `/var/tmp`, not in `.next`.
+- Because Turbopack rejects the out-of-project `node_modules` symlink, the
+  `build`/`dev` scripts pass `--webpack` (supported in Next 16).
 - Prisma is pinned to v6 because the ratified schema sketch targets the
   `prisma-client-js` generator, which Prisma 7 removed.
 - Prefer running the Prisma CLI via `node node_modules/prisma/build/index.js`

@@ -10,7 +10,7 @@
  * before/after are JSON snapshots of the affected record (use `toAuditJson`;
  * Dates → ISO strings, undefined dropped, BigInt → string).
  */
-import type { AuditAction, Prisma } from "@prisma/client";
+import { Prisma, type AuditAction, type PrismaClient } from "@prisma/client";
 import { db } from "@/server/db/client";
 
 export interface AuditLogInput {
@@ -28,7 +28,7 @@ export interface AuditLogInput {
   userAgent?: string | null;
 }
 
-type Tx = Prisma.TransactionClient | Prisma.PrismaClient;
+type Tx = Prisma.TransactionClient | PrismaClient;
 
 /** JSON-encode an arbitrary value for storage in a Json column. */
 export function toAuditJson(value: unknown): Prisma.InputJsonValue {
@@ -57,9 +57,9 @@ export async function writeAuditLog(input: AuditLogInput, tx: Tx = db): Promise<
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId ?? null,
-      before: input.before ?? null,
-      after: input.after ?? null,
-      metadata: input.metadata ?? null,
+      before: input.before ?? Prisma.JsonNull,
+      after: input.after ?? Prisma.JsonNull,
+      metadata: input.metadata ?? Prisma.JsonNull,
       actorUserId: input.actorUserId ?? null,
       actorClerkUserId: input.actorClerkUserId ?? null,
       requestId: input.requestId ?? null,

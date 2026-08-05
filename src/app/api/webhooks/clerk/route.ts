@@ -44,16 +44,28 @@ function mapClerkRoleToLocal(clerkRole: string | undefined): Role {
   return clerkRole === "org:admin" ? Role.ADMIN : Role.OFFICE_STAFF;
 }
 
+/**
+ * Clerk's WebhookEvent unions include deleted variants whose `data` is only
+ * DeletedObjectJSON ({ id, object, deleted }); narrow to the upsertable shapes.
+ */
+type OrganizationUpsertEvent = Extract<
+  OrganizationWebhookEvent,
+  { type: "organization.created" | "organization.updated" }
+>;
+type UserUpsertEvent = Extract<UserWebhookEvent, { type: "user.created" | "user.updated" }>;
+
 function slugify(value: string): string {
-  return value
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60) || "org";
+  return (
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 60) || "org"
+  );
 }
 
-async function handleOrganizationCreated(evt: OrganizationWebhookEvent): Promise<void> {
+async function handleOrganizationCreated(evt: OrganizationUpsertEvent): Promise<void> {
   const d = evt.data;
   await db.organization.upsert({
     where: { clerkOrganizationId: d.id },
@@ -72,7 +84,7 @@ async function handleOrganizationCreated(evt: OrganizationWebhookEvent): Promise
 }
 
 async function handleOrganizationDeleted(evt: OrganizationWebhookEvent): Promise<void> {
-  const d = evt.data;
+  const d = evt.data; // narrowed by the switch: DeletedObjectJSON for organization.deleted
   // Mark-inactive-not-delete (design §8.5): tombstone the slug so a future org
   // reusing the same slug can't collide on the unique constraint, and deactivate
   // all memberships so requireOrg() fails closed for everyone.
@@ -95,7 +107,7 @@ async function handleOrganizationDeleted(evt: OrganizationWebhookEvent): Promise
   log("info", `organization.deleted handled for ${d.id} (inactive:${result.count > 0})`);
 }
 
-async function handleUserCreated(evt: UserWebhookEvent): Promise<void> {
+async function handleUserCreated(evt: UserUpsertEvent): Promise<void> {
   const d = evt.data;
   const primaryEmail =
     d.email_addresses?.find((e) => e.id === d.primary_email_address_id)?.email_address ??

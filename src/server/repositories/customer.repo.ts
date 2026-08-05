@@ -10,7 +10,7 @@
  * The repository layer is DB-only: input is expected to be already validated
  * (Zod, src/lib/validation.ts) and authorized (requirePermission) by the caller.
  */
-import type { Customer, CustomerType, Prisma } from "@prisma/client";
+import type { Customer, CustomerType, Prisma, PrismaClient } from "@prisma/client";
 
 export interface CustomerListParams {
   /** Case-insensitive match on first/last name, company, email or phone. */
@@ -44,9 +44,9 @@ export interface CustomerRepo {
   remove(id: string): Promise<Customer>;
 }
 
-type PrismaClient = Prisma.TransactionClient | Prisma.PrismaClient;
+type Client = Prisma.TransactionClient | PrismaClient;
 
-export function createCustomerRepo(prisma: PrismaClient, organizationId: string): CustomerRepo {
+export function createCustomerRepo(prisma: Client, organizationId: string): CustomerRepo {
   const tenant = { organizationId } as const;
 
   return {

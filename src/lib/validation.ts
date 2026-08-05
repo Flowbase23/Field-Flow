@@ -39,22 +39,25 @@ export const phoneSchema = z
 /** Cents as a non-negative integer. */
 export const centsSchema = z.number().int().nonnegative().optional().nullable();
 
-export const customerCreateSchema = z
-  .object({
-    firstName: optionalString,
-    lastName: optionalString,
-    companyName: optionalString,
-    email: emailSchema,
-    phone: phoneSchema,
-    type: z.nativeEnum(CustomerType).default(CustomerType.RESIDENTIAL),
-    notes: optionalString,
-  })
-  .refine((v) => v.firstName || v.lastName || v.companyName, {
+const customerBaseSchema = z.object({
+  firstName: optionalString,
+  lastName: optionalString,
+  companyName: optionalString,
+  email: emailSchema,
+  phone: phoneSchema,
+  type: z.nativeEnum(CustomerType).default(CustomerType.RESIDENTIAL),
+  notes: optionalString,
+});
+
+export const customerCreateSchema = customerBaseSchema.refine(
+  (v) => v.firstName || v.lastName || v.companyName,
+  {
     message: "Provide at least a first name, last name, or company name.",
     path: ["firstName"],
-  });
+  },
+);
 
-export const customerUpdateSchema = customerCreateSchema.partial();
+export const customerUpdateSchema = customerBaseSchema.partial();
 
 export const leadCreateSchema = z.object({
   customerId: z.string().cuid().optional().nullable(),

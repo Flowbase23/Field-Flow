@@ -5,7 +5,7 @@
  * directly; use `tenantDb(organizationId)` (server/db/tenant-db.ts) or compose
  * repositories here. `organizationId` must originate from requireOrg().
  */
-import type { Prisma } from "@prisma/client";
+import type { Appointment, Invoice, Job, Lead, Prisma, PrismaClient, Technician } from "@prisma/client";
 import { createCustomerRepo, type CustomerRepo } from "./customer.repo";
 import {
   createAppointmentRepo,
@@ -15,9 +15,8 @@ import {
   createTechnicianRepo,
   type StubRepo,
 } from "./stubs";
-import type { Appointment, Invoice, Job, Lead, Technician } from "@prisma/client";
 
-type PrismaClient = Prisma.TransactionClient | Prisma.PrismaClient;
+type Client = Prisma.TransactionClient | PrismaClient;
 
 export interface TenantRepositories {
   customers: CustomerRepo;
