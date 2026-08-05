@@ -1,0 +1,535 @@
+// FieldFlow — Phase 1 Prisma schema
+// Source of truth: /home/team/shared/phase1-design.md (ratified-by-team architecture design, §3).
+//
+// Implementation notes / deviations from the design sketch (all intentional, see README §Tenant isolation):
+//  1. Compound-relation validation (design §3 "Schema notes"): Prisma requires that when a relation
+//     field is optional, ALL scalar fields backing it are nullable. Tenant models keep a NON-NULL
+//     `organizationId` (design mechanism A), so an optional relation cannot include `organizationId`
+//     in its foreign key. Therefore:
+//       - Required tenant relations use compound FKs (id, organizationId) — the strong cross-tenant
+//         guarantee the design's mechanism D asks for (e.g. Location→Customer, Job→Customer/Location,
+//         Technician join tables, Invoice→Customer, TimeEntry→Technician).
+//       - Optional tenant links (Lead.customer, Job.lead, Appointment.job/location, TimeEntry.job,
+//         Invoice.job) use an id-only FK with onDelete: SetNull. The tenant predicate is enforced on
+//         these by the repository layer (design mechanism B) — never by raw WHERE-free queries.
+//  2. `@@unique([id, organizationId])` added to Customer, Technician, Appointment (the design lists it
+//     for Location and Job; the other three need it to support the compound FKs above).
+//  3. `Organization.isActive` added (the design's risk §8.5 mandates "mark-inactive-not-delete" for
+//     Clerk organization.deleted; the sketch lacked a flag to express it). requireOrg() checks it.
+//  4. `@@index([organizationId, customerId])` on Lead for the tenant-scoped lead→customer lookup.
+//  5. AuditLog is append-only by convention: nothing in the app ever updates/deletes audit rows
+//     (no Prisma-level enforcement exists; see src/server/audit + README).
+//
+// Migration workflow: prisma migrate dev (local) / prisma migrate deploy (CI). NEVER `db push` on a
+// shared database. No live database exists yet — migrations land with the first real DATABASE_URL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  OFFICE_STAFF
+  DISPATCHER
+  TECHNICIAN
+  SALES_REP
+  CUSTOMER_PORTAL_USER
+}
+
+enum Permission {
+  ORGANIZATION_READ
+  ORGANIZATION_UPDATE
+  MEMBERS_READ
+  MEMBERS_MANAGE
+  CUSTOMER_READ
+  CUSTOMER_CREATE
+  CUSTOMER_UPDATE
+  CUSTOMER_DELETE
+  LEAD_READ
+  LEAD_CREATE
+  LEAD_UPDATE
+  LEAD_DELETE
+  JOB_READ
+  JOB_CREATE
+  JOB_UPDATE
+  JOB_DELETE
+  JOB_ASSIGN
+  JOB_STATUS_UPDATE
+  SCHEDULE_READ
+  SCHEDULE_CREATE
+  SCHEDULE_UPDATE
+  SCHEDULE_DELETE
+  DASHBOARD_READ
+  AUDIT_READ
+}
+
+enum CustomerType {
+  RESIDENTIAL
+  COMMERCIAL
+  PROPERTY_MANAGER
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  ESTIMATE
+  WON
+  LOST
+}
+
+enum LeadSource {
+  WEBSITE
+  PHONE
+  REFERRAL
+  ADVERTISEMENT
+  REPEAT_CUSTOMER
+  PARTNER
+  OTHER
+}
+
+enum JobType {
+  SERVICE_CALL
+  INSTALLATION
+  INSPECTION
+  MAINTENANCE
+  EMERGENCY
+  WARRANTY
+}
+
+enum JobStatus {
+  DRAFT
+  UNSCHEDULED
+  SCHEDULED
+  EN_ROUTE
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+}
+
+enum JobPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum AppointmentStatus {
+  TENTATIVE
+  CONFIRMED
+  EN_ROUTE
+  IN_PROGRESS
+  COMPLETED
+  MISSED
+  CANCELLED
+}
+
+enum AppointmentType {
+  JOB
+  BLOCKED_TIME
+  TRAVEL
+  OTHER
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  VOID
+  OVERDUE
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  INVITE_SENT
+  INVITE_ACCEPTED
+  ROLE_CHANGED
+  STATUS_CHANGED
+  EXPORT
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+// Tenant root. One row per Clerk organization (Organization.clerkOrganizationId = Clerk orgId).
+// isActive supports the Clerk organization.deleted tombstone flow (design §8.5: mark-inactive-not-delete).
+model Organization {
+  id                  String   @id @default(cuid())
+  clerkOrganizationId String   @unique
+  slug                String   @unique
+  name                String
+  timezone            String   @default("America/New_York")
+  currency            String   @default("USD")
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  memberships     Membership[]
+  customers       Customer[]
+  locations       Location[]
+  leads           Lead[]
+  technicians     Technician[]
+  jobs            Job[]
+  appointments    Appointment[]
+  invoices        Invoice[]
+  auditLogs       AuditLog[]
+  rolePermissions RolePermission[]
+  timeEntries     TimeEntry[]
+}
+
+// Global identity row, synced from Clerk (User.clerkUserId = Clerk userId). Not tenant-owned.
+model User {
+  id          String   @id @default(cuid())
+  clerkUserId String   @unique
+  email       String
+  firstName   String?
+  lastName    String?
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships         Membership[]
+  // One-to-many (not 1:1): the same user can be a Technician in several organizations —
+  // Technician has @@unique([organizationId, userId]).
+  technicians         Technician[]
+  auditLogs           AuditLog[] @relation("AuditActor")
+  createdAppointments Appointment[] @relation("AppointmentCreatedBy")
+}
+
+// Local membership is AUTHORITATIVE for app roles (Clerk is identity/invitation source only).
+model Membership {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           Role
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId, role, isActive])
+}
+
+// Per-organization role→permission overrides. When rows exist for (organizationId, role) they
+// REPLACE the built-in defaults (see src/server/auth/permissions.ts).
+model RolePermission {
+  id             String     @id @default(cuid())
+  organizationId String
+  role           Role
+  permission     Permission
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, role, permission])
+  @@index([organizationId, role])
+}
+
+model Customer {
+  id             String       @id @default(cuid())
+  organizationId String
+  firstName      String?
+  lastName       String?
+  companyName    String?
+  email          String?
+  phone          String?
+  type           CustomerType @default(RESIDENTIAL)
+  notes          String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  locations    Location[]
+  leads        Lead[]
+  jobs         Job[]
+  invoices     Invoice[]
+
+  // Compound unique so tenant-scoped relations (Location.customer, Job.customer, Invoice.customer)
+  // can reference (id, organizationId) — design mechanism D.
+  @@unique([id, organizationId])
+  @@index([organizationId, updatedAt])
+  @@index([organizationId, lastName, firstName])
+  @@index([organizationId, companyName])
+  @@index([organizationId, email])
+  @@index([organizationId, phone])
+}
+
+model Location {
+  id             String   @id @default(cuid())
+  organizationId String
+  customerId     String
+  label          String   @default("Primary")
+  address1       String
+  address2       String?
+  city           String
+  state          String
+  postalCode     String
+  country        String   @default("US")
+  latitude       Decimal? @db.Decimal(10, 7)
+  longitude      Decimal? @db.Decimal(10, 7)
+  timezone       String?
+  accessNotes    String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  jobs         Job[]
+  appointments Appointment[]
+
+  @@unique([id, organizationId])
+  @@index([organizationId, customerId])
+  @@index([organizationId, city, state])
+}
+
+model Lead {
+  id                  String     @id @default(cuid())
+  organizationId      String
+  customerId          String?
+  ownerUserId         String?
+  source              LeadSource
+  status              LeadStatus @default(NEW)
+  pipelineStage       String     @default("new")
+  title               String
+  description         String?
+  estimatedValueCents Int?
+  firstContactedAt    DateTime?
+  qualifiedAt         DateTime?
+  wonAt               DateTime?
+  lostAt              DateTime?
+  lostReason          String?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Optional link → id-only FK (see header note 1). Tenant predicate enforced by the Lead repository.
+  customer     Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  jobs         Job[]
+
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, source, createdAt])
+  @@index([organizationId, ownerUserId, status])
+  @@index([organizationId, wonAt])
+  @@index([organizationId, customerId])
+}
+
+model Technician {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  employeeCode   String?
+  skills         String[] @default([])
+  isActive       Boolean  @default(true)
+  hireDate       DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs         JobTechnician[]
+  appointments AppointmentTechnician[]
+  timeEntries  TimeEntry[]
+
+  // Compound unique so join tables + TimeEntry can reference (id, organizationId) — design mechanism D.
+  @@unique([id, organizationId])
+  @@unique([organizationId, userId])
+  @@unique([organizationId, employeeCode])
+  @@index([organizationId, isActive])
+}
+
+model Job {
+  id                 String      @id @default(cuid())
+  organizationId     String
+  customerId         String
+  locationId         String
+  leadId             String?
+  jobNumber          Int
+  type               JobType
+  status             JobStatus   @default(DRAFT)
+  priority           JobPriority @default(NORMAL)
+  title              String
+  description        String?
+  quotedAmountCents  Int?
+  subtotalCents      Int         @default(0)
+  taxCents           Int         @default(0)
+  totalCents         Int         @default(0)
+  actualRevenueCents Int?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  location     Location     @relation(fields: [locationId, organizationId], references: [id, organizationId])
+  // Optional link → id-only FK (see header note 1). Tenant predicate enforced by the Job repository.
+  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  technicians  JobTechnician[]
+  appointments Appointment[]
+  invoices     Invoice[]
+  timeEntries  TimeEntry[]
+
+  @@unique([organizationId, jobNumber])
+  @@unique([id, organizationId])
+  @@index([organizationId, status, priority])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, completedAt])
+  @@index([organizationId, type, status])
+  @@index([organizationId, customerId, createdAt])
+}
+
+model JobTechnician {
+  jobId          String
+  technicianId   String
+  organizationId String
+  isPrimary      Boolean  @default(false)
+  assignedAt     DateTime @default(now())
+
+  job         Job         @relation(fields: [jobId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  technician  Technician  @relation(fields: [technicianId, organizationId], references: [id, organizationId], onDelete: Cascade)
+
+  @@id([jobId, technicianId])
+  @@index([organizationId, technicianId, assignedAt])
+}
+
+model Appointment {
+  id                  String            @id @default(cuid())
+  organizationId      String
+  jobId               String?
+  locationId          String?
+  createdByUserId     String?
+  type                AppointmentType   @default(JOB)
+  status              AppointmentStatus @default(TENTATIVE)
+  title               String
+  startsAt            DateTime
+  endsAt              DateTime
+  timezone            String
+  travelMinutesBefore Int               @default(0)
+  travelMinutesAfter  Int               @default(0)
+  actualStartAt       DateTime?
+  actualEndAt         DateTime?
+  missedAt            DateTime?
+  notes               String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Optional links → id-only FKs (see header note 1). Tenant predicate enforced by repositories.
+  job          Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  location     Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  createdBy    User?        @relation("AppointmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  technicians  AppointmentTechnician[]
+
+  // Compound unique so AppointmentTechnician can reference (id, organizationId) — design mechanism D.
+  @@unique([id, organizationId])
+  @@index([organizationId, startsAt, endsAt])
+  @@index([organizationId, status, startsAt])
+  @@index([organizationId, jobId])
+}
+
+model AppointmentTechnician {
+  appointmentId String
+  technicianId  String
+  organizationId String
+
+  appointment Appointment @relation(fields: [appointmentId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  technician  Technician  @relation(fields: [technicianId, organizationId], references: [id, organizationId], onDelete: Cascade)
+
+  @@id([appointmentId, technicianId])
+  @@index([organizationId, technicianId, appointmentId])
+}
+
+model TimeEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  technicianId   String
+  jobId          String?
+  startedAt      DateTime
+  endedAt        DateTime?
+  minutes        Int?
+  billable       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  technician   Technician   @relation(fields: [technicianId, organizationId], references: [id, organizationId])
+  // Optional link → id-only FK (see header note 1). Tenant predicate enforced by repositories.
+  job          Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, technicianId, startedAt])
+  @@index([organizationId, jobId, startedAt])
+}
+
+// Phase 1 minimal Invoice (full workflows land in Phase 2).
+model Invoice {
+  id              String        @id @default(cuid())
+  organizationId  String
+  customerId      String
+  jobId           String?
+  invoiceNumber   Int
+  status          InvoiceStatus @default(DRAFT)
+  issuedAt        DateTime?
+  dueAt           DateTime?
+  paidAt          DateTime?
+  subtotalCents   Int           @default(0)
+  taxCents        Int           @default(0)
+  totalCents      Int           @default(0)
+  paidCents       Int           @default(0)
+  balanceCents    Int           @default(0)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  // Optional link → id-only FK (see header note 1). Tenant predicate enforced by repositories.
+  job          Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, invoiceNumber])
+  @@index([organizationId, status, dueAt])
+  @@index([organizationId, issuedAt])
+  @@index([organizationId, paidAt])
+  @@index([organizationId, customerId])
+}
+
+// Append-only by convention: app code never updates or deletes audit rows.
+model AuditLog {
+  id               String      @id @default(cuid())
+  organizationId   String
+  actorUserId      String?
+  actorClerkUserId String?
+  action           AuditAction
+  entityType       String
+  entityId         String?
+  before           Json?
+  after            Json?
+  metadata         Json?
+  requestId        String?
+  ipAddress        String?
+  userAgent        String?
+  createdAt        DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, entityType, entityId, createdAt])
+  @@index([organizationId, actorUserId, createdAt])
+}
