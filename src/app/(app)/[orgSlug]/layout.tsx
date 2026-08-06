@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireOrg } from "@/server/auth/require-org";
+import { permissionsFor } from "@/server/auth/permissions";
 import { UnauthorizedError } from "@/lib/errors";
 import { OrgShell } from "@/components/layout/org-shell";
 import { Providers } from "@/components/providers";
@@ -36,6 +37,7 @@ export default async function OrgLayout({
   if (ctx.organization.slug !== orgSlug) {
     redirect(`/${ctx.organization.slug}`);
   }
+  const permissions = await permissionsFor(ctx.organizationId, ctx.membership.role);
 
   return (
     <Providers>
@@ -44,6 +46,7 @@ export default async function OrgLayout({
         orgSlug={ctx.organization.slug}
         userEmail={ctx.user.email}
         role={ctx.membership.role}
+        permissions={permissions}
       >
         {children}
       </OrgShell>

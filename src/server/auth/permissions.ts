@@ -118,3 +118,14 @@ export async function hasPermission(
 export function hasRole(role: Role, allowedRoles: readonly Role[]): boolean {
   return allowedRoles.includes(role);
 }
+
+/** Hard safety rule: a member may never change their own role or active status. */
+export function canChangeMembership(actorUserId: string, targetUserId: string, operation: "role" | "status"): boolean {
+  void operation;
+  return actorUserId !== targetUserId;
+}
+
+/** Client-safe equivalent for already-loaded effective permissions. */
+export function can(permissions: readonly Permission[], permission: Permission): boolean {
+  return permissions.includes(permission);
+}

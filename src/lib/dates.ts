@@ -34,7 +34,11 @@ const partsFormatter = new Intl.DateTimeFormat("en-US", {
  */
 export function datePartsInTz(date: Date, timeZone: string): DateParts {
   // formatToParts is locale/format stable; we only read the parts by type.
-  const parts = partsFormatter.formatToParts(date);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
   const get = (type: string): number => {
     const part = parts.find((p) => p.type === type);
     const value = part ? Number(part.value) : NaN;

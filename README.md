@@ -8,6 +8,12 @@ communication, and reporting in one app. This repository is the **platform app**
 Architecture authority: `/home/team/shared/phase1-design.md` (ratified-by-team
 design). Read it before changing schema or authz decisions.
 
+## Slice 2 — shell & RBAC
+
+The tenant shell at `(app)/[orgSlug]` calls `requireOrg()` at the layout boundary and derives the effective role permissions from the local membership plus `RolePermission` overrides. Navigation is permission-filtered, while each page independently calls `requirePermission()` for defense in depth. Use `can(permissions, permission)` or `<RequirePermission>` for UI actions; server actions must still call `requirePermission()` and write an audit entry. The Members view is tenant-scoped and marks Clerk invitations/mutations **PENDING LIVE VERIFICATION** until Clerk keys are configured; self role/status changes are rejected by `canChangeMembership`.
+
+Dashboard KPI cards are empty-state placeholders with definitions for today's jobs, in-progress, completed, revenue today/month (revenue definition remains configurable pending owner decision), outstanding invoices, average ticket, technician utilization, lead conversion, and missed appointments. Organization timezone is used by `orgDayRange()` in `src/lib/dates.ts`.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.
