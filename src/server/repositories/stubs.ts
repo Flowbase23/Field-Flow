@@ -10,7 +10,6 @@ import type {
   Appointment,
   Invoice,
   Job,
-  Lead,
   Technician,
 } from "@prisma/client";
 import { NotImplementedError } from "@/lib/errors";
@@ -40,8 +39,6 @@ function makeStubRepo<T>(model: string, slice: string): StubRepo<T> {
   };
 }
 
-export const createLeadRepo = (_prisma: unknown, _organizationId: string): StubRepo<Lead> =>
-  makeStubRepo("LeadRepo", "Slice 3 (CRM)");
 
 export const createJobRepo = (_prisma: unknown, _organizationId: string): StubRepo<Job> =>
   makeStubRepo("JobRepo", "Slice 5 (Jobs & dispatch)");
