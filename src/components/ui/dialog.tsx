@@ -3,7 +3,7 @@
  * Dialog — shadcn-style wrapper over @base-ui/react Dialog (installed,
  * memory-light; no Radix). Used by the appointment create/edit form.
  */
-import * as Dialog from "@base-ui/react/dialog";
+import { Dialog } from "@base-ui/react/dialog";
 import { cn } from "@/lib/utils";
 
 export function DialogRoot(props: React.ComponentProps<typeof Dialog.Root>) {

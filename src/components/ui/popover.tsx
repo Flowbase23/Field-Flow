@@ -3,7 +3,7 @@
  * Popover — shadcn-style wrapper over @base-ui/react Popover (installed,
  * memory-light; no Radix). Used for the appointment detail popover.
  */
-import * as Popover from "@base-ui/react/popover";
+import { Popover } from "@base-ui/react/popover";
 import { cn } from "@/lib/utils";
 
 export function PopoverRoot(props: React.ComponentProps<typeof Popover.Root>) {

@@ -95,14 +95,28 @@ export function AppointmentForm({
   }, [initial]);
 
   const schema = mode === "create" ? appointmentCreateSchema : appointmentUpdateActionSchema;
-  const form = useForm({
-    resolver: zodResolver(schema as never),
-    defaultValues: defaultValues as never,
+  type FormValues = {
+    title: string;
+    type: string;
+    startsAt: string;
+    endsAt: string;
+    timezone: string;
+    technicianIds: string[];
+    jobId: string;
+    locationId: string;
+    travelMinutesBefore: number;
+    travelMinutesAfter: number;
+    notes: string;
+    allowOverlap: boolean;
+  };
+  const form = useForm<FormValues>({
+    resolver: zodResolver(schema as unknown as Parameters<typeof zodResolver>[0]),
+    defaultValues: defaultValues as FormValues,
   });
 
   const { register, control, handleSubmit, formState } = form;
 
-  async function onSubmit(values: Record<string, unknown>) {
+  async function onSubmit(values: FormValues) {
     setPending(true);
     setError(null);
     const payload = {
