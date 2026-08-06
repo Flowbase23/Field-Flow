@@ -7,6 +7,7 @@
  */
 import type { Appointment, Invoice, Job, Lead, Prisma, PrismaClient, Technician } from "@prisma/client";
 import { createCustomerRepo, type CustomerRepo } from "./customer.repo";
+import { createMembershipRepo, type MembershipRepo } from "./membership.repo";
 import {
   createAppointmentRepo,
   createInvoiceRepo,
@@ -19,6 +20,7 @@ import {
 type Client = Prisma.TransactionClient | PrismaClient;
 
 export interface TenantRepositories {
+  memberships: MembershipRepo; // Slice 2 — settings/members mutations
   customers: CustomerRepo;
   leads: StubRepo<Lead>; // Slice 3
   jobs: StubRepo<Job>; // Slice 5
@@ -28,10 +30,11 @@ export interface TenantRepositories {
 }
 
 export function tenantRepositories(
-  prisma: PrismaClient,
+  prisma: Client,
   organizationId: string,
 ): TenantRepositories {
   return {
+    memberships: createMembershipRepo(prisma, organizationId),
     customers: createCustomerRepo(prisma, organizationId),
     leads: createLeadRepo(prisma, organizationId),
     jobs: createJobRepo(prisma, organizationId),

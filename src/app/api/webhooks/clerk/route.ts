@@ -27,7 +27,7 @@ import type {
   WebhookEvent,
 } from "@clerk/nextjs/server";
 import { db } from "@/server/db/client";
-import { Role } from "@prisma/client";
+import { clerkRoleKeyToLocalRole } from "@/features/organizations/clerk-roles";
 
 export const dynamic = "force-dynamic";
 
@@ -39,10 +39,13 @@ function log(level: "info" | "warn" | "error", msg: string, extra?: unknown): vo
   else console.log(line, extra ?? "");
 }
 
-/** "org:admin" → ADMIN; anything else gets the OFFICE_STAFF default. */
-function mapClerkRoleToLocal(clerkRole: string | undefined): Role {
-  return clerkRole === "org:admin" ? Role.ADMIN : Role.OFFICE_STAFF;
-}
+/**
+ * Clerk role key → local Role. Single source of truth is
+ * src/features/organizations/clerk-roles.ts (the same mapping the invite
+ * action uses in reverse), so an invitation sent with "org:technician" lands
+ * as a TECHNICIAN membership. Unknown keys default to OFFICE_STAFF.
+ */
+const mapClerkRoleToLocal = clerkRoleKeyToLocalRole;
 
 /**
  * Clerk's WebhookEvent unions include deleted variants whose `data` is only
