@@ -5,18 +5,14 @@
  * directly; use `tenantDb(organizationId)` (server/db/tenant-db.ts) or compose
  * repositories here. `organizationId` must originate from requireOrg().
  */
-import type { Appointment, Invoice, Job, Prisma, PrismaClient, Technician } from "@prisma/client";
+import type { Invoice, Job, Prisma, PrismaClient } from "@prisma/client";
 import { createCustomerRepo, type CustomerRepo } from "./customer.repo";
 import { createLeadRepo, type LeadRepo } from "./lead.repo";
 import { createLocationRepo, type LocationRepo } from "./location.repo";
 import { createMembershipRepo, type MembershipRepo } from "./membership.repo";
-import {
-  createAppointmentRepo,
-  createInvoiceRepo,
-  createJobRepo,
-  createTechnicianRepo,
-  type StubRepo,
-} from "./stubs";
+import { createAppointmentRepo, type AppointmentRepo } from "./appointment.repo";
+import { createTechnicianRepo, type TechnicianRepo } from "./technician.repo";
+import { createInvoiceRepo, createJobRepo, type StubRepo } from "./stubs";
 type Client = Prisma.TransactionClient | PrismaClient;
 export interface TenantRepositories {
   memberships: MembershipRepo; // Slice 2 — settings/members mutations
@@ -24,8 +20,8 @@ export interface TenantRepositories {
   locations: LocationRepo; // Slice 3 — CRM (nested under customers)
   leads: LeadRepo; // Slice 3 — CRM lead pipeline
   jobs: StubRepo<Job>; // Slice 5
-  appointments: StubRepo<Appointment>; // Slice 4
-  technicians: StubRepo<Technician>; // Slice 4
+  appointments: AppointmentRepo; // Slice 4 — scheduling & calendar
+  technicians: TechnicianRepo; // Slice 4 — technician assignment
   invoices: StubRepo<Invoice>; // Phase 2
 }
 export function tenantRepositories(

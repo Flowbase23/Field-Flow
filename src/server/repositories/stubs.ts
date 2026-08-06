@@ -7,10 +7,8 @@
  * the slice that will implement them; nothing is silently stubbed.
  */
 import type {
-  Appointment,
   Invoice,
   Job,
-  Technician,
 } from "@prisma/client";
 import { NotImplementedError } from "@/lib/errors";
 
@@ -43,18 +41,9 @@ function makeStubRepo<T>(model: string, slice: string): StubRepo<T> {
 export const createJobRepo = (_prisma: unknown, _organizationId: string): StubRepo<Job> =>
   makeStubRepo("JobRepo", "Slice 5 (Jobs & dispatch)");
 
-export const createAppointmentRepo = (
-  _prisma: unknown,
-  _organizationId: string,
-): StubRepo<Appointment> => makeStubRepo("AppointmentRepo", "Slice 4 (Scheduling)");
-
-export const createTechnicianRepo = (
-  _prisma: unknown,
-  _organizationId: string,
-): StubRepo<Technician> => makeStubRepo("TechnicianRepo", "Slice 4 (Scheduling)");
-
 export const createInvoiceRepo = (_prisma: unknown, _organizationId: string): StubRepo<Invoice> =>
   makeStubRepo("InvoiceRepo", "Phase 2 (Invoices & payments)");
 
-// Note: createCustomerRepo is intentionally NOT here — it lives in customer.repo.ts
-// as the fully implemented worked example.
+// Note: createCustomerRepo / createLeadRepo / createLocationRepo /
+// createMembershipRepo / createAppointmentRepo / createTechnicianRepo are NOT
+// here — they live in their own files as fully implemented repos.
