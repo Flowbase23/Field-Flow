@@ -31,6 +31,39 @@ Conventions: every action starts with `requirePermission`, validates with a Zod 
 
 The Settings page form and the Members page controls are permission-gated (`can()`/`canManage` prop computed server-side) with self-mutation always disabled; the Members page hides the invite form without `MEMBERS_MANAGE`.
 
+## Slice 3 — CRM (customers, locations, leads)
+The CRM slice is code-complete. All reads/writes are tenant-scoped (repos inject the organizationId predicate), permission-gated (server actions re-check `requirePermission`), audited (append-only AuditLog rows in the same transaction via `withAudit`) and validated with Zod (schemas in `features/customers/schemas.ts` and `features/leads/schemas.ts`, shared with client forms).
+
+### Pages
+| Route | Permission | What it does |
+|---|---|---|
+| `/customers` | `CUSTOMER_READ` | List with search (name/company/email/phone), type filter, active/inactive filter, pagination, status badges, deactivate/reactivate row action |
+| `/customers/new` | `CUSTOMER_CREATE` | Create form (server action `createCustomer`) |
+| `/customers/[id]` | `CUSTOMER_READ` (+ `LEAD_READ`/`JOB_READ` for sections) | Detail: header, locations manager, linked leads, jobs empty state (Slice 5), timeline placeholder (Phase 2) |
+| `/customers/[id]/edit` | `CUSTOMER_UPDATE` | Edit form (server action `updateCustomer`) |
+| `/leads` | `LEAD_READ` | List with status filter, source filter, search, pagination |
+| `/leads/new` | `LEAD_CREATE` | Create form incl. sales-rep assignment + optional customer link |
+| `/leads/[id]` | `LEAD_READ` (+ `LEAD_UPDATE` for controls) | Detail: description, pipeline controls, customer association, edit link |
+| `/leads/[id]/edit` | `LEAD_UPDATE` | Full edit (status NOT editable here — pipeline only) |
+
+### Duplicate policy
+On customer create (and update when email/phone change), an existing **active** customer in the same org with the same email (case-insensitive) or phone blocks the write with a 409 `ConflictError` telling the operator to **link to the existing record instead** (`features/customers/duplicates.ts` — pure logic, unit-tested). Inactive (soft-deleted) customers never block. Reactivation is `CUSTOMER_UPDATE`-gated; deactivation is `CUSTOMER_DELETE`-gated; both audit `STATUS_CHANGED`.
+
+### Lead pipeline (server-enforced)
+`src/server/domain/lead-pipeline.ts` (pure, unit-tested) owns the transition map — `NEW → CONTACTED → QUALIFIED → ESTIMATE → WON`, any stage → `LOST` (reason required, enforced by the action AND the Zod schema), `WON`/`LOST` terminal. Illegal transitions → `ConflictError`; every change is audited `STATUS_CHANGED` with before/after + timestamps (`firstContactedAt`, `qualifiedAt`, `wonAt`, `lostAt`). The UI only offers allowed next statuses; the server is authoritative.
+
+### Lead ↔ customer
+- `attachCustomerToLead` links an existing customer (org-scope verified — Lead.customer is an id-only FK per the Slice 1 deviation).
+- `convertWonLead` converts a WON lead into a customer (minimal per the slice brief): creates the Customer (deriving name from the lead title), links `lead.customerId`, audits Customer CREATE + Lead UPDATE in one transaction. The "first job placeholder" is deliberately deferred to Slice 5 (job creation needs a location + org-local jobNumber allocation).
+
+### Actions (all in `features/*/server/`, all audited)
+`createCustomer` / `updateCustomer` / `setCustomerActive` (CREATE/UPDATE/STATUS_CHANGED), `createLocation` / `updateLocation` / `deleteLocation` (CREATE/UPDATE/DELETE), `createLead` / `updateLead` / `updateLeadStatus` / `attachCustomerToLead` / `convertWonLead` (CREATE/UPDATE/STATUS_CHANGED). All return `ActionResult`; cross-tenant ids → `NotFoundError`.
+
+### Tests
+`tests/crm-schemas.test.ts` (customer/location/lead Zod valid+invalid), `tests/customer-duplicates.test.ts` (duplicate policy), `tests/lead-pipeline.test.ts` (transition map, LOST-requires-reason, timestamps). No live-DB/Clerk tests — those land in the verification pass.
+
+**PENDING LIVE VERIFICATION** (all of Slice 3): `requirePermission()` depends on real Clerk keys and a provisioned org, so every page/action above is code-complete but unexercised at runtime; DB writes are untested until the verification pass.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.

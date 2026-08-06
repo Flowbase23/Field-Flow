@@ -22,7 +22,7 @@ describe("lead transition map", () => {
     expect(canTransitionLead("QUALIFIED", "ESTIMATE")).toBe(true);
     expect(canTransitionLead("ESTIMATE", "WON")).toBe(true);
     // Any non-terminal status can be lost (with a reason).
-    for (const from of ["NEW", "CONTACTED", "QUALIFIED", "ESTIMATE"]) {
+    for (const from of ["NEW", "CONTACTED", "QUALIFIED", "ESTIMATE"] as const) {
       expect(canTransitionLead(from, "LOST")).toBe(true);
     }
   });
@@ -37,7 +37,7 @@ describe("lead transition map", () => {
   });
 
   it("treats WON and LOST as terminal", () => {
-    for (const to of ["NEW", "CONTACTED", "QUALIFIED", "ESTIMATE", "WON", "LOST"]) {
+    for (const to of ["NEW", "CONTACTED", "QUALIFIED", "ESTIMATE", "WON", "LOST"] as const) {
       expect(canTransitionLead("WON", to)).toBe(false);
       expect(canTransitionLead("LOST", to)).toBe(false);
     }
@@ -53,7 +53,7 @@ describe("lead transition map", () => {
 
   it("only LOST requires a lost reason", () => {
     expect(transitionRequiresLostReason("LOST")).toBe(true);
-    for (const to of ["NEW", "CONTACTED", "QUALIFIED", "ESTIMATE", "WON"]) {
+    for (const to of ["NEW", "CONTACTED", "QUALIFIED", "ESTIMATE", "WON"] as const) {
       expect(transitionRequiresLostReason(to)).toBe(false);
     }
   });
