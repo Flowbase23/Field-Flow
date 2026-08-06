@@ -36,6 +36,8 @@ export interface LocationCreateData {
 export type LocationUpdateData = Partial<Omit<LocationCreateData, "customerId">>;
 
 export interface LocationRepo {
+  /** All locations in the org (label asc, then createdAt) — schedule picker source. */
+  listAll(): Promise<Location[]>;
   /** All locations for a customer within the org (label asc, then createdAt). */
   listByCustomer(customerId: string): Promise<Location[]>;
   /** Tenant-scoped lookup; cross-tenant ids return null (→ NotFoundError upstream). */
@@ -52,6 +54,13 @@ export function createLocationRepo(prisma: Client, organizationId: string): Loca
   const tenant = { organizationId } as const;
 
   return {
+    async listAll() {
+      return prisma.location.findMany({
+        where: tenant,
+        orderBy: [{ label: "asc" }, { createdAt: "asc" }],
+      });
+    },
+
     async listByCustomer(customerId) {
       return prisma.location.findMany({
         where: { ...tenant, customerId },
