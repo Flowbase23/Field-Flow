@@ -14,6 +14,23 @@ The tenant shell at `(app)/[orgSlug]` calls `requireOrg()` at the layout boundar
 
 Dashboard KPI cards are empty-state placeholders with definitions for today's jobs, in-progress, completed, revenue today/month (revenue definition remains configurable pending owner decision), outstanding invoices, average ticket, technician utilization, lead conversion, and missed appointments. Organization timezone is used by `orgDayRange()` in `src/lib/dates.ts`.
 
+### Slice 2 follow-up — members/settings mutation server actions
+
+Three server actions under `src/features/organizations/` complete the members/settings slice:
+
+| Action | File | Guards | Audit action |
+|---|---|---|---|
+| `changeRole(membershipId, role)` | `server/members.actions.ts` | `requirePermission(MEMBERS_MANAGE)`, Zod `Role` enum, tenant-scoped target (`membership.repo`), `canChangeMembership` self-rule | `ROLE_CHANGED` (before/after) |
+| `setMemberActive(membershipId, isActive)` | `server/members.actions.ts` | same as above | `STATUS_CHANGED` (before/after) |
+| `inviteMember(email, role)` | `server/members.actions.ts` | `requirePermission(MEMBERS_MANAGE)`, Zod email+role, conflict-check on active memberships | `INVITE_SENT` |
+| `updateOrg({ name, timezone, currency })` | `server/org.actions.ts` | `requirePermission(ORGANIZATION_UPDATE)`, Zod name (trimmed) / IANA timezone (`Intl` check) / 3-letter ISO 4217 currency | `UPDATE` (before/after) |
+
+Conventions: every action starts with `requirePermission`, validates with a Zod schema from `src/features/organizations/schemas.ts` (shared with the client forms), reaches the `Membership` model only through the tenant-scoped `src/server/repositories/membership.repo.ts` (registered on `tenantDb`), writes its audit row in the same transaction via `withAudit`, and returns `ActionResult` so the UI can surface typed errors. Role/status/org-settings mutations are fully local — they work against the live `DATABASE_URL` once a session exists.
+
+**`inviteMember` is PENDING LIVE VERIFICATION.** Clerk is the invitation source and the flow is Clerk-first: it calls `clerkClient().organizations.createOrganizationInvitation(...)` with the session org's `clerkOrganizationId`, and only on success upserts a pending (inactive) local `Membership` for invitees who are already known local users (the webhook flips it active on acceptance). Without `CLERK_SECRET_KEY` it fails closed (`CLERK_NOT_CONFIGURED`). The custom Clerk role keys used for non-admin roles (`org:dispatcher`, `org:technician`, `org:sales_rep`, `org:customer_portal_user`) must be created in the Clerk dashboard; the shared mapping lives in `src/features/organizations/clerk-roles.ts` and the webhook now uses it in reverse, so an invite sent with `org:technician` lands as a `TECHNICIAN` membership on acceptance.
+
+The Settings page form and the Members page controls are permission-gated (`can()`/`canManage` prop computed server-side) with self-mutation always disabled; the Members page hides the invite form without `MEMBERS_MANAGE`.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.
