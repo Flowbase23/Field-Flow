@@ -10,7 +10,7 @@
  * The repository layer is DB-only: input is expected to be already validated
  * (Zod, src/lib/validation.ts) and authorized (requirePermission) by the caller.
  */
-import type { Customer, CustomerType, Prisma, PrismaClient } from "@prisma/client";
+import type { Customer, CustomerType, Location, Prisma, PrismaClient } from "@prisma/client";
 
 export interface CustomerListParams {
   /** Case-insensitive match on first/last name, company, email or phone. */
@@ -19,6 +19,8 @@ export interface CustomerListParams {
   isActive?: boolean;
   page?: number; // 1-based
   pageSize?: number; // default 25, max 100
+  /** Include _count of locations/leads/jobs for list display (one extra COUNT per row batch). */
+  withCounts?: boolean;
 }
 
 /** Scalar create input — organizationId is intentionally NOT part of this type. */
@@ -34,12 +36,31 @@ export interface CustomerCreateData {
 
 export type CustomerUpdateData = Partial<CustomerCreateData>;
 
+/** A customer plus its locations and relation counts (customer detail page). */
+export interface CustomerDetail extends Customer {
+  locations: Location[];
+  _count: { jobs: number; leads: number; locations: number };
+}
+
 export interface CustomerRepo {
   list(params?: CustomerListParams): Promise<Customer[]>;
   count(params?: Omit<CustomerListParams, "page" | "pageSize">): Promise<number>;
   getById(id: string): Promise<Customer | null>;
+  /**
+   * Customer with locations + relation counts for the detail page.
+   * Cross-tenant ids return null (→ NotFoundError upstream).
+   */
+  getDetail(id: string): Promise<CustomerDetail | null>;
+  /**
+   * ACTIVE customers in this org matching email (case-insensitive) or phone —
+   * the duplicate-policy candidate set (features/customers/duplicates.ts picks
+   * the offender and formats the message).
+   */
+  findByEmailOrPhone(email?: string | null, phone?: string | null): Promise<Customer[]>;
   create(data: CustomerCreateData): Promise<Customer>;
   update(id: string, data: CustomerUpdateData): Promise<Customer>;
+  /** Activate/deactivate (soft delete) via the compound selector. */
+  setActive(id: string, isActive: boolean): Promise<Customer>;
   /** Soft delete (isActive = false); records are never hard-deleted. */
   remove(id: string): Promise<Customer>;
 }
@@ -51,7 +72,7 @@ export function createCustomerRepo(prisma: Client, organizationId: string): Cust
 
   return {
     async list(params = {}) {
-      const { search, type, isActive, page = 1, pageSize = 25 } = params;
+      const { search, type, isActive, page = 1, pageSize = 25, withCounts = false } = params;
       return prisma.customer.findMany({
         where: {
           ...tenant,
@@ -69,6 +90,7 @@ export function createCustomerRepo(prisma: Client, organizationId: string): Cust
               }
             : {}),
         },
+        ...(withCounts ? { include: { _count: { select: { locations: true, leads: true, jobs: true } } } } : {}),
         orderBy: [{ updatedAt: "desc" }],
         take: Math.min(pageSize, 100),
         skip: (page - 1) * Math.min(pageSize, 100),
@@ -104,6 +126,31 @@ export function createCustomerRepo(prisma: Client, organizationId: string): Cust
       });
     },
 
+    async getDetail(id) {
+      return prisma.customer.findFirst({
+        where: { id, ...tenant },
+        include: {
+          locations: { orderBy: [{ label: "asc" }, { createdAt: "asc" }] },
+          _count: { select: { jobs: true, leads: true, locations: true } },
+        },
+      });
+    },
+
+    async findByEmailOrPhone(email, phone) {
+      if (!email?.trim() && !phone?.trim()) return [];
+      return prisma.customer.findMany({
+        where: {
+          ...tenant,
+          isActive: true,
+          OR: [
+            ...(email?.trim() ? [{ email: { equals: email.trim(), mode: "insensitive" } as const }] : []),
+            ...(phone?.trim() ? [{ phone: { equals: phone.trim() } }] : []),
+          ],
+        },
+        take: 10,
+      });
+    },
+
     async create(data) {
       return prisma.customer.create({ data: { ...tenant, ...data } });
     },
@@ -113,6 +160,13 @@ export function createCustomerRepo(prisma: Client, organizationId: string): Cust
       return prisma.customer.update({
         where: { id_organizationId: { id, organizationId } },
         data,
+      });
+    },
+
+    async setActive(id, isActive) {
+      return prisma.customer.update({
+        where: { id_organizationId: { id, organizationId } },
+        data: { isActive },
       });
     },
 
