@@ -19,12 +19,14 @@ import { AppointmentForm, type AppointmentFormInitial } from "./appointment-form
 import { AppointmentDetail } from "./appointment-detail";
 import {
   appointmentDayPosition,
+  DAY_MINUTES,
   dayOfMonth,
   formatDayInTz,
   isToday,
   statusDotClass,
   viewRange,
   viewTitle,
+  type ScheduleView,
   type SerializedAppointment,
   type SerializedTechnician,
 } from "./calendar";

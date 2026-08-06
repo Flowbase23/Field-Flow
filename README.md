@@ -64,6 +64,30 @@ On customer create (and update when email/phone change), an existing **active** 
 
 **PENDING LIVE VERIFICATION** (all of Slice 3): `requirePermission()` depends on real Clerk keys and a provisioned org, so every page/action above is code-complete but unexercised at runtime; DB writes are untested until the verification pass.
 
+## Slice 4 — Scheduling & calendar
+
+The scheduling slice provides a tenant-scoped schedule at `/{orgSlug}/schedule`, protected by `SCHEDULE_READ`, with a lightweight custom calendar grid rather than a calendar dependency. Its URL-backed controls provide **day**, **week**, and **month** views, date navigation, and an active-technician filter; the visible UTC range is calculated from organization-local day boundaries before repositories query it.
+
+### Appointment actions and permissions
+
+- **Create** (`SCHEDULE_CREATE`) and **edit** (`SCHEDULE_UPDATE`) appointments through the shared RHF/Zod form. The form supports appointment type, assigned technicians, job/location links, travel buffers, notes, and an explicit IANA timezone.
+- **Cancel** is a delete-like action guarded by `SCHEDULE_DELETE`. Status changes and **mark missed** are guarded by `SCHEDULE_UPDATE`.
+- Every mutation validates input, re-checks the tenant-scoped target/related records, writes an audit entry in the mutation transaction, and returns a typed `ActionResult` for inline UI errors.
+
+### Server-enforced status transition map
+
+`TENTATIVE → CONFIRMED → EN_ROUTE → IN_PROGRESS → COMPLETED`. Cancellation is allowed from every non-terminal live status (`TENTATIVE`, `CONFIRMED`, `EN_ROUTE`, `IN_PROGRESS`); `MISSED` is allowed manually from `CONFIRMED`, `EN_ROUTE`, or `IN_PROGRESS`. `COMPLETED`, `MISSED`, and `CANCELLED` are terminal. The server owns this map and rejects invalid transitions; it also records first `IN_PROGRESS` as `actualStartAt`, `COMPLETED` as `actualEndAt`, and `MISSED` as `missedAt`.
+
+### Conflict policy
+
+On create and update, the server rejects an overlap for the **same technician**, using half-open `[start, end)` intervals expanded by each appointment's before/after travel buffers. The conflict message identifies the conflicting appointment. An overlap can proceed only when the caller explicitly sets `allowOverlap: true` **and** has effective `SCHEDULE_UPDATE` permission (the Dispatcher/Admin override); a create-only caller cannot bypass the policy.
+
+### Timezone model
+
+Appointment inputs are wall-clock `datetime-local` values plus an explicit IANA timezone, defaulting to the organization timezone. The server converts them to UTC for storage; calendar rendering converts stored UTC instants back to the organization-local timezone. The `src/lib/dates.ts` helpers calculate local midnights, ranges, and conversions in a DST-safe way, so visible days/ranges do not assume every local day has 24 hours.
+
+**PENDING LIVE VERIFICATION:** the runtime schedule page and every appointment mutation remain session-gated until real Clerk credentials, a provisioned organization, and a live database are available. The code and unit tests cover the pure calendar/timezone, conflict, status-transition, and validation logic; live authorization, DB persistence, audit writes, and browser interaction still require that verification pass.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.

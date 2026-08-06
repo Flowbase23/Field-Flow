@@ -10,7 +10,7 @@
  */
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Button } from "@/components/ui/button";
 import { DialogRoot, DialogContent, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
@@ -110,7 +110,7 @@ export function AppointmentForm({
     allowOverlap: boolean;
   };
   const form = useForm<FormValues>({
-    resolver: zodResolver(schema as unknown as Parameters<typeof zodResolver>[0]),
+    resolver: zodResolver(schema as unknown as Parameters<typeof zodResolver>[0]) as unknown as Resolver<FormValues>,
     defaultValues: defaultValues as FormValues,
   });
 
