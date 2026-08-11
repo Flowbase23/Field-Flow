@@ -8,7 +8,6 @@
  */
 import type {
   Invoice,
-  Job,
 } from "@prisma/client";
 import { NotImplementedError } from "@/lib/errors";
 
@@ -36,10 +35,6 @@ function makeStubRepo<T>(model: string, slice: string): StubRepo<T> {
     remove: () => pending("remove"),
   };
 }
-
-
-export const createJobRepo = (_prisma: unknown, _organizationId: string): StubRepo<Job> =>
-  makeStubRepo("JobRepo", "Slice 5 (Jobs & dispatch)");
 
 export const createInvoiceRepo = (_prisma: unknown, _organizationId: string): StubRepo<Invoice> =>
   makeStubRepo("InvoiceRepo", "Phase 2 (Invoices & payments)");
