@@ -51,7 +51,17 @@ export const jobUpdateActionSchema = z.object({ id: cuidSchema, ...jobUpdateSche
 export const jobStatusUpdateSchema = z.object({ id: cuidSchema, status: jobStatusSchema }).strict();
 export const jobReadSchema = z.object({ id: cuidSchema }).strict();
 
+/** Dispatch assignment payloads; JOB_ASSIGN is enforced independently server-side. */
+export const jobTechnicianAssignSchema = z.object({
+  jobId: cuidSchema,
+  technicianId: cuidSchema,
+  isPrimary: z.boolean().optional().default(false),
+}).strict();
+export const jobTechnicianUnassignSchema = z.object({ jobId: cuidSchema, technicianId: cuidSchema }).strict();
+export const jobTechnicianPrimarySchema = z.object({ jobId: cuidSchema, technicianId: cuidSchema }).strict();
+
 export type JobCreateInput = z.infer<typeof jobCreateSchema>;
 export type JobUpdateInput = z.infer<typeof jobUpdateSchema>;
 export type JobUpdateActionInput = z.infer<typeof jobUpdateActionSchema>;
 export type JobStatusUpdateInput = z.infer<typeof jobStatusUpdateSchema>;
+export type JobTechnicianAssignInput = z.infer<typeof jobTechnicianAssignSchema>;

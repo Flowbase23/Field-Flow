@@ -52,8 +52,7 @@ export function AppointmentForm({
   initial?: AppointmentFormInitial;
   technicians: SerializedTechnician[];
   locations: { id: string; label: string }[];
-  /** Jobs arrive in Slice 5 — the select is ready but empty until then. */
-  jobs: { id: string; title: string }[];
+  jobs: { id: string; title: string; locationId: string }[];
   showAllowOverlap: boolean;
 }) {
   const router = useRouter();
@@ -79,14 +78,14 @@ export function AppointmentForm({
       };
     }
     return {
-      title: "",
-      type: "JOB",
+      title: initial?.title ?? "",
+      type: initial?.type ?? "JOB",
       startsAt: initial ? utcToLocalDateTime(new Date(initial.startsAt), initial.timezone) : "",
       endsAt: initial ? utcToLocalDateTime(new Date(initial.endsAt), initial.timezone) : "",
       timezone: initial?.timezone ?? "America/New_York",
-      technicianIds: [] as string[],
-      jobId: "",
-      locationId: "",
+      technicianIds: initial?.technicianIds ?? [] as string[],
+      jobId: initial?.jobId ?? "",
+      locationId: initial?.locationId ?? "",
       travelMinutesBefore: 0,
       travelMinutesAfter: 0,
       notes: "",
@@ -244,15 +243,14 @@ export function AppointmentForm({
           <div className="grid gap-4 sm:grid-cols-2">
             <label>
               <span className={labelClass}>Linked job</span>
-              <select {...register("jobId")} className={inputClass}>
+              <select {...register("jobId", { onChange: (event) => {
+                const selected = jobs.find((job) => job.id === event.target.value);
+                if (selected) form.setValue("locationId", selected.locationId, { shouldValidate: true });
+              } })} className={inputClass}>
                 <option value="">None</option>
-                {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>
-                    {j.title}
-                  </option>
-                ))}
+                {jobs.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}
               </select>
-              {jobs.length === 0 && <span className="text-xs text-muted-foreground">Jobs arrive in the next slice.</span>}
+              <span className="text-xs text-muted-foreground">A linked job uses its service location.</span>
             </label>
             <label>
               <span className={labelClass}>Location</span>

@@ -43,16 +43,18 @@ interface ScheduleViewClientProps {
   technicians: SerializedTechnician[];
   selectedTechIds: string[];
   locations: { id: string; label: string }[];
-  jobs: { id: string; title: string }[];
+  jobs: { id: string; title: string; locationId: string }[];
+  /** Optional tenant-validated job-detail launch payload. */
+  initialCreate?: AppointmentFormInitial | null;
   canCreate: boolean;
   canUpdate: boolean;
   canDelete: boolean;
 }
 
 export function ScheduleViewClient(props: ScheduleViewClientProps) {
-  const { orgSlug, timezone, view, anchorDate, appointments, technicians, selectedTechIds, locations, jobs, canCreate, canUpdate, canDelete } = props;
-  const [draft, setDraft] = useState<AppointmentFormInitial | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
+  const { orgSlug, timezone, view, anchorDate, appointments, technicians, selectedTechIds, locations, jobs, canCreate, canUpdate, canDelete, initialCreate } = props;
+  const [draft, setDraft] = useState<AppointmentFormInitial | null>(initialCreate ?? null);
+  const [createOpen, setCreateOpen] = useState(Boolean(initialCreate));
   const [editTarget, setEditTarget] = useState<SerializedAppointment | null>(null);
 
   const anchor = useMemo(() => localDateTimeToUtc(`${anchorDate}T00:00`, timezone), [anchorDate, timezone]);

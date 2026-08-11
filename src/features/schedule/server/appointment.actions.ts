@@ -98,8 +98,11 @@ function appointmentSnapshot(appt: {
 }
 
 /** Revalidate every schedule view (the whole calendar re-reads the range). */
-function revalidateSchedule(orgSlug: string): void {
+function revalidateSchedule(orgSlug: string, jobIds: Array<string | null | undefined> = []): void {
   revalidatePath(`/${orgSlug}/schedule`);
+  for (const jobId of new Set(jobIds.filter((id): id is string => Boolean(id)))) {
+    revalidatePath(`/${orgSlug}/jobs/${jobId}`);
+  }
 }
 
 /**
@@ -268,7 +271,7 @@ export async function createAppointment(input: unknown): Promise<ActionResult<Ap
         ),
     );
 
-    revalidateSchedule(ctx.organization.slug);
+    revalidateSchedule(ctx.organization.slug, [fields.jobId]);
     return {
       ok: true,
       data: {
@@ -385,7 +388,7 @@ export async function updateAppointment(input: unknown): Promise<ActionResult<Ap
         ),
     );
 
-    revalidateSchedule(ctx.organization.slug);
+    revalidateSchedule(ctx.organization.slug, [existing.jobId, fields.jobId !== undefined ? fields.jobId : existing.jobId]);
     return {
       ok: true,
       data: {

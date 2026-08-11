@@ -88,7 +88,7 @@ Appointment inputs are wall-clock `datetime-local` values plus an explicit IANA 
 
 **PENDING LIVE VERIFICATION:** the runtime schedule page and every appointment mutation remain session-gated until real Clerk credentials, a provisioned organization, and a live database are available. The code and unit tests cover the pure calendar/timezone, conflict, status-transition, and validation logic; live authorization, DB persistence, audit writes, and browser interaction still require that verification pass.
 
-## Slice 5 — Jobs UI & lifecycle (current increment)
+## Slice 5 — Jobs & dispatch workflow
 
 The existing tenant-safe Job foundation now has server-rendered App Router screens at `/{orgSlug}/jobs`, `/jobs/new`, `/jobs/[jobId]`, and `/jobs/[jobId]/edit`. Every page derives tenant identity from `requirePermission()` (never from browser input), and every job/customer/location lookup flows through organization-bound repositories.
 
@@ -97,7 +97,11 @@ The existing tenant-safe Job foundation now has server-rendered App Router scree
 - Detail is `JOB_READ`-gated and shows customer/location, job-level quoted/subtotal/tax/total/actual-revenue amounts, description, and lifecycle timestamps. Monetary form conversion and display use integer-cent helpers (no floating-point conversion). These values are **not invoices or payments**.
 - Lifecycle controls render only when the current role has `JOB_STATUS_UPDATE`, and only expose the pure transition map's valid next state(s). `EN_ROUTE`, `IN_PROGRESS`, `ON_HOLD`, `COMPLETED`, and `CANCELLED` are reachable when their server-enforced predecessor rules allow; `setJobStatus` still independently authorizes, validates, checks tenancy, guards against stale writes, audits, and rejects invalid transitions.
 
-Technician assignment and appointment/job linkage remain deliberately deferred to the **next Slice 5 increment**. Invoices, payments, and billing workflows remain **Phase 2** work. Runtime authorization and database persistence remain PENDING LIVE VERIFICATION until Clerk keys, a provisioned organization, and a live database are configured.
+- Dispatch assignment is `JOB_ASSIGN`-gated independently from job read/update. The tenant-scoped repository lists only active eligible technicians, rejects off-tenant IDs, and transactionally enforces **zero or one primary**: promoting/assigning a primary demotes the prior primary, while unassigning deletes the join so an unassigned technician cannot remain primary. Assignment, unassignment, and primary changes are audited.
+- Job detail shows assigned technicians (including the explicit primary designation) and job-linked appointments. Roles without `JOB_ASSIGN` get a read-only assignment view; roles without `SCHEDULE_READ` do not receive appointment details. The **Schedule appointment** action uses the existing shared scheduler with a tenant-validated job and service-location prefill.
+- Appointment creates/updates validate optional job links and require a job-linked appointment to use that job's in-tenant service location (and therefore its customer). Job-detail appointment reads are tenant-scoped and displayed with existing organization timezone utilities.
+
+Invoices, payments, and billing workflows remain **Phase 2** work. Runtime authorization and database persistence remain PENDING LIVE VERIFICATION until Clerk keys, a provisioned organization, and a live database are configured; this README does not claim live Clerk or database verification.
 
 ## What's built (Slice 1)
 

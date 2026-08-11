@@ -216,3 +216,70 @@ export async function setJobStatus(input: unknown): Promise<ActionResult<JobActi
     return actionError(err);
   }
 }
+
+/** Assign an active in-tenant technician. JOB_ASSIGN is intentionally separate from JOB_UPDATE. */
+export async function assignJobTechnician(input: unknown): Promise<ActionResult<{ jobId: string; technicianId: string; isPrimary: boolean }>> {
+  try {
+    const ctx = await requirePermission(Permission.JOB_ASSIGN);
+    const { jobId, technicianId, isPrimary } = (await import("../schemas")).jobTechnicianAssignSchema.parse(input);
+    await db.$transaction(async (tx) => {
+      const repo = createJobRepo(tx, ctx.organizationId);
+      const detail = await repo.getDetail(jobId);
+      if (!detail) throw new NotFoundError("Job not found in this organization.");
+      const prior = detail.technicians.find((assignment) => assignment.technicianId === technicianId);
+      await repo.assignTechnician(jobId, technicianId, isPrimary);
+      await writeAuditLog({
+        organizationId: ctx.organizationId, action: AuditAction.UPDATE, entityType: "JobTechnician", entityId: `${jobId}:${technicianId}`,
+        before: toAuditJson(prior ? { technicianId, isPrimary: prior.isPrimary } : null),
+        after: toAuditJson({ technicianId, isPrimary }), metadata: toAuditJson({ operation: isPrimary ? "assign-primary" : "assign" }),
+        actorUserId: ctx.userId, actorClerkUserId: ctx.clerkUserId,
+      }, tx);
+    });
+    revalidateJobs(ctx.organization.slug, jobId);
+    return { ok: true, data: { jobId, technicianId, isPrimary } };
+  } catch (err) { return actionError(err); }
+}
+
+/** Remove an assignment. The join row deletion guarantees an unassigned technician cannot remain primary. */
+export async function unassignJobTechnician(input: unknown): Promise<ActionResult<{ jobId: string; technicianId: string }>> {
+  try {
+    const ctx = await requirePermission(Permission.JOB_ASSIGN);
+    const { jobId, technicianId } = (await import("../schemas")).jobTechnicianUnassignSchema.parse(input);
+    await db.$transaction(async (tx) => {
+      const repo = createJobRepo(tx, ctx.organizationId);
+      const detail = await repo.getDetail(jobId);
+      if (!detail) throw new NotFoundError("Job not found in this organization.");
+      const prior = detail.technicians.find((assignment) => assignment.technicianId === technicianId);
+      await repo.unassignTechnician(jobId, technicianId);
+      await writeAuditLog({
+        organizationId: ctx.organizationId, action: AuditAction.UPDATE, entityType: "JobTechnician", entityId: `${jobId}:${technicianId}`,
+        before: toAuditJson(prior ? { technicianId, isPrimary: prior.isPrimary } : null), after: toAuditJson(null), metadata: toAuditJson({ operation: "unassign" }),
+        actorUserId: ctx.userId, actorClerkUserId: ctx.clerkUserId,
+      }, tx);
+    });
+    revalidateJobs(ctx.organization.slug, jobId);
+    return { ok: true, data: { jobId, technicianId } };
+  } catch (err) { return actionError(err); }
+}
+
+/** Promote an existing assignment; repository transaction demotes the former primary first. */
+export async function setPrimaryJobTechnician(input: unknown): Promise<ActionResult<{ jobId: string; technicianId: string }>> {
+  try {
+    const ctx = await requirePermission(Permission.JOB_ASSIGN);
+    const { jobId, technicianId } = (await import("../schemas")).jobTechnicianPrimarySchema.parse(input);
+    await db.$transaction(async (tx) => {
+      const repo = createJobRepo(tx, ctx.organizationId);
+      const detail = await repo.getDetail(jobId);
+      if (!detail) throw new NotFoundError("Job not found in this organization.");
+      const priorPrimary = detail.technicians.find((assignment) => assignment.isPrimary);
+      await repo.setPrimaryTechnician(jobId, technicianId);
+      await writeAuditLog({
+        organizationId: ctx.organizationId, action: AuditAction.UPDATE, entityType: "JobTechnician", entityId: `${jobId}:${technicianId}`,
+        before: toAuditJson({ primaryTechnicianId: priorPrimary?.technicianId ?? null }), after: toAuditJson({ primaryTechnicianId: technicianId }), metadata: toAuditJson({ operation: "set-primary" }),
+        actorUserId: ctx.userId, actorClerkUserId: ctx.clerkUserId,
+      }, tx);
+    });
+    revalidateJobs(ctx.organization.slug, jobId);
+    return { ok: true, data: { jobId, technicianId } };
+  } catch (err) { return actionError(err); }
+}

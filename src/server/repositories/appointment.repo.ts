@@ -71,6 +71,8 @@ export interface AppointmentRepo {
   listInRange(params: AppointmentRangeParams): Promise<AppointmentListItem[]>;
   /** Tenant-scoped lookup; cross-tenant ids return null (→ NotFoundError upstream). */
   getById(id: string): Promise<AppointmentListItem | null>;
+  /** Job detail feed. Verifies the job itself is in this tenant before listing. */
+  listForJob(jobId: string): Promise<AppointmentListItem[]>;
   /**
    * Tenant-scoped candidates for conflict detection: appointments that involve
    * one of `technicianIds` and overlap [start, end), excluding
@@ -103,22 +105,23 @@ const listInclude = {
 export function createAppointmentRepo(prisma: Client, organizationId: string): AppointmentRepo {
   const tenant = { organizationId } as const;
 
-  /** jobId/locationId are id-only FKs — verify tenant-scope before every write. */
+  /**
+   * jobId/locationId are id-only FKs — verify tenant scope and, when linked to a
+   * job, require its exact service location. That location already has a compound
+   * FK to the job customer, so this rejects both cross-tenant and wrong-customer
+   * appointment tuples before the write.
+   */
   async function assertLinksInOrg(data: { jobId?: string | null; locationId?: string | null }): Promise<void> {
-    if (data.jobId) {
-      const job = await prisma.job.findFirst({ where: { id: data.jobId, ...tenant }, select: { id: true } });
-      if (!job) {
-        throw new NotFoundError("The linked job does not belong to this organization.");
-      }
-    }
-    if (data.locationId) {
-      const location = await prisma.location.findFirst({
-        where: { id: data.locationId, ...tenant },
-        select: { id: true },
-      });
-      if (!location) {
-        throw new NotFoundError("The linked location does not belong to this organization.");
-      }
+    const job = data.jobId
+      ? await prisma.job.findFirst({ where: { id: data.jobId, ...tenant }, select: { id: true, customerId: true, locationId: true } })
+      : null;
+    if (data.jobId && !job) throw new NotFoundError("The linked job does not belong to this organization.");
+    const location = data.locationId
+      ? await prisma.location.findFirst({ where: { id: data.locationId, ...tenant }, select: { id: true, customerId: true } })
+      : null;
+    if (data.locationId && !location) throw new NotFoundError("The linked location does not belong to this organization.");
+    if (job && (!location || location.id !== job.locationId || location.customerId !== job.customerId)) {
+      throw new NotFoundError("A job-linked appointment must use that job's service location.");
     }
   }
 
@@ -140,6 +143,12 @@ export function createAppointmentRepo(prisma: Client, organizationId: string): A
 
     async getById(id) {
       return prisma.appointment.findFirst({ where: { id, ...tenant }, include: listInclude });
+    },
+
+    async listForJob(jobId) {
+      const job = await prisma.job.findFirst({ where: { id: jobId, ...tenant }, select: { id: true } });
+      if (!job) throw new NotFoundError("Job not found in this organization.");
+      return prisma.appointment.findMany({ where: { ...tenant, jobId }, include: listInclude, orderBy: [{ startsAt: "asc" }] });
     },
 
     async findOverlapping({ start, end, technicianIds, excludeAppointmentId }) {
@@ -170,11 +179,14 @@ export function createAppointmentRepo(prisma: Client, organizationId: string): A
     },
 
     async update(id, data, technicianIds) {
-      await assertLinksInOrg(data);
       const existing = await prisma.appointment.findFirst({ where: { id, ...tenant } });
       if (!existing) {
         throw new NotFoundError("Appointment not found in this organization.");
       }
+      await assertLinksInOrg({
+        jobId: data.jobId === undefined ? existing.jobId : data.jobId,
+        locationId: data.locationId === undefined ? existing.locationId : data.locationId,
+      });
       if (technicianIds !== undefined) {
         await prisma.appointmentTechnician.deleteMany({ where: { appointmentId: id, organizationId } });
         if (technicianIds.length > 0) {
