@@ -11,7 +11,7 @@
  * transaction; when it is composed from an existing transaction (as the job
  * actions do for audit atomicity), it participates in that transaction.
  */
-import { Prisma, type Job, type JobPriority, type JobStatus, type JobType, type PrismaClient } from "@prisma/client";
+import { Prisma, type Customer, type Job, type JobPriority, type JobStatus, type JobType, type Lead, type Location, type PrismaClient } from "@prisma/client";
 import { ConflictError, NotFoundError } from "@/lib/errors";
 
 type Client = Prisma.TransactionClient | PrismaClient;
@@ -42,15 +42,27 @@ export interface JobStatusUpdateData {
 
 export interface JobListParams {
   status?: JobStatus;
+  priority?: JobPriority;
   customerId?: string;
   page?: number;
   pageSize?: number;
 }
 
+/** Relation data intentionally limited to what the Jobs UI needs. */
+export interface JobListItem extends Job {
+  customer: Pick<Customer, "id" | "firstName" | "lastName" | "companyName">;
+  location: Pick<Location, "id" | "label" | "address1" | "city" | "state" | "postalCode">;
+}
+
+export interface JobDetail extends JobListItem {
+  lead: Pick<Lead, "id" | "title"> | null;
+}
+
 export interface JobRepo {
-  list(params?: JobListParams): Promise<Job[]>;
+  list(params?: JobListParams): Promise<JobListItem[]>;
   count(params?: Omit<JobListParams, "page" | "pageSize">): Promise<number>;
   getById(id: string): Promise<Job | null>;
+  getDetail(id: string): Promise<JobDetail | null>;
   /** Allocate the next tenant-local job number atomically and create the job. */
   create(data: JobCreateData): Promise<Job>;
   /** Validate the final customer/location/lead tuple before a tenant-scoped update. */
@@ -120,23 +132,38 @@ export function createJobRepo(prisma: Client, organizationId: string): JobRepo {
 
   return {
     async list(params = {}) {
-      const { status, customerId, page = 1, pageSize = 25 } = params;
+      const { status, priority, customerId, page = 1, pageSize = 25 } = params;
       const safePage = Math.max(1, page);
       const safePageSize = Math.max(1, Math.min(pageSize, 100));
       return prisma.job.findMany({
-        where: { ...tenant, status, customerId },
-        orderBy: [{ createdAt: "desc" }],
+        where: { ...tenant, status, priority, customerId },
+        include: {
+          customer: { select: { id: true, firstName: true, lastName: true, companyName: true } },
+          location: { select: { id: true, label: true, address1: true, city: true, state: true, postalCode: true } },
+        },
+        orderBy: [{ updatedAt: "desc" }],
         take: safePageSize,
         skip: (safePage - 1) * safePageSize,
       });
     },
 
     async count(params = {}) {
-      return prisma.job.count({ where: { ...tenant, status: params.status, customerId: params.customerId } });
+      return prisma.job.count({ where: { ...tenant, status: params.status, priority: params.priority, customerId: params.customerId } });
     },
 
     async getById(id) {
       return prisma.job.findFirst({ where: { id, ...tenant } });
+    },
+
+    async getDetail(id) {
+      return prisma.job.findFirst({
+        where: { id, ...tenant },
+        include: {
+          customer: { select: { id: true, firstName: true, lastName: true, companyName: true } },
+          location: { select: { id: true, label: true, address1: true, city: true, state: true, postalCode: true } },
+          lead: { select: { id: true, title: true } },
+        },
+      });
     },
 
     async create(data) {

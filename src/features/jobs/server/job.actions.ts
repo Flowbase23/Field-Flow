@@ -94,8 +94,9 @@ function updateSnapshot(existing: Parameters<typeof jobSnapshot>[0], data: JobUp
   });
 }
 
-function revalidateJobs(orgSlug: string): void {
+function revalidateJobs(orgSlug: string, jobId?: string): void {
   revalidatePath(`/${orgSlug}/jobs`);
+  if (jobId) revalidatePath(`/${orgSlug}/jobs/${jobId}`);
 }
 
 /** Tenant-scoped read primitive. JOB_READ is enforced independently of any UI. */
@@ -134,7 +135,7 @@ export async function createJob(input: unknown): Promise<ActionResult<JobActionR
       );
       return created;
     });
-    revalidateJobs(ctx.organization.slug);
+    revalidateJobs(ctx.organization.slug, created.id);
     return { ok: true, data: { id: created.id, jobNumber: created.jobNumber, status: created.status, title: created.title } };
   } catch (err) {
     return actionError(err);
@@ -168,7 +169,7 @@ export async function updateJob(input: unknown): Promise<ActionResult<JobActionR
       );
       return updated;
     });
-    revalidateJobs(ctx.organization.slug);
+    revalidateJobs(ctx.organization.slug, updated.id);
     return { ok: true, data: { id: updated.id, jobNumber: updated.jobNumber, status: updated.status, title: updated.title } };
   } catch (err) {
     return actionError(err);
@@ -206,7 +207,7 @@ export async function setJobStatus(input: unknown): Promise<ActionResult<JobActi
       );
       return { changed: true, job: transition.job };
     });
-    if (result.changed) revalidateJobs(ctx.organization.slug);
+    if (result.changed) revalidateJobs(ctx.organization.slug, result.job.id);
     return {
       ok: true,
       data: { id: result.job.id, jobNumber: result.job.jobNumber, status: result.job.status, title: result.job.title },

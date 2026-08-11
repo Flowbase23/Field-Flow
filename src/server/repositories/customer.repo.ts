@@ -42,8 +42,14 @@ export interface CustomerDetail extends Customer {
   _count: { jobs: number; leads: number; locations: number };
 }
 
+export interface CustomerWithLocations extends Customer {
+  locations: Location[];
+}
+
 export interface CustomerRepo {
   list(params?: CustomerListParams): Promise<Customer[]>;
+  /** Tenant-scoped customer/location options for Job create/edit forms. */
+  listWithLocations(params?: Pick<CustomerListParams, "isActive">): Promise<CustomerWithLocations[]>;
   count(params?: Omit<CustomerListParams, "page" | "pageSize">): Promise<number>;
   getById(id: string): Promise<Customer | null>;
   /**
@@ -94,6 +100,15 @@ export function createCustomerRepo(prisma: Client, organizationId: string): Cust
         orderBy: [{ updatedAt: "desc" }],
         take: Math.min(pageSize, 100),
         skip: (page - 1) * Math.min(pageSize, 100),
+      });
+    },
+
+    async listWithLocations(params = {}) {
+      return prisma.customer.findMany({
+        where: { ...tenant, isActive: params.isActive },
+        include: { locations: { orderBy: [{ label: "asc" }, { createdAt: "asc" }] } },
+        orderBy: [{ companyName: "asc" }, { lastName: "asc" }, { firstName: "asc" }],
+        take: 100,
       });
     },
 

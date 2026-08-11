@@ -14,7 +14,7 @@ import { leadStatusLabel } from "@/server/domain/lead-pipeline";
 
 /**
  * Customer detail page (Phase 1, Slice 3): header, locations (manage), linked
- * leads, jobs (empty state until Slice 5) and a Phase-2 timeline placeholder.
+ * leads, job count/link, and a Phase-2 timeline placeholder.
  * Permission-gated via CUSTOMER_READ; the Leads section additionally requires
  * LEAD_READ and Jobs requires JOB_READ. Cross-tenant ids → notFound() (404).
  * PENDING LIVE VERIFICATION: needs a real Clerk session.
@@ -128,7 +128,8 @@ export default async function CustomerDetailPage({
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              No jobs yet — {customer._count.jobs > 0 ? `${customer._count.jobs} exist but aren't listed until the Jobs slice.` : "job creation arrives in the Jobs slice (Phase 1, Slice 5)."}
+              {customer._count.jobs === 0 ? "No jobs linked yet." : `${customer._count.jobs} job${customer._count.jobs === 1 ? "" : "s"} linked to this customer.`} {" "}
+              <Link href={`/${ctx.organization.slug}/jobs`} className="font-medium text-primary hover:underline">View jobs</Link>
             </p>
           </CardContent>
         </Card>
