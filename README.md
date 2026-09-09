@@ -12,7 +12,7 @@ design). Read it before changing schema or authz decisions.
 
 The tenant shell at `(app)/[orgSlug]` calls `requireOrg()` at the layout boundary and derives the effective role permissions from the local membership plus `RolePermission` overrides. Navigation is permission-filtered, while each page independently calls `requirePermission()` for defense in depth. Use `can(permissions, permission)` or `<RequirePermission>` for UI actions; server actions must still call `requirePermission()` and write an audit entry. The Members view is tenant-scoped and marks Clerk invitations/mutations **PENDING LIVE VERIFICATION** until Clerk keys are configured; self role/status changes are rejected by `canChangeMembership`.
 
-Dashboard KPI cards are empty-state placeholders with definitions for today's jobs, in-progress, completed, revenue today/month (revenue definition remains configurable pending owner decision), outstanding invoices, average ticket, technician utilization, lead conversion, and missed appointments. Organization timezone is used by `orgDayRange()` in `src/lib/dates.ts`.
+The Phase 1 dashboard at `/{orgSlug}/` is `DASHBOARD_READ`-gated and URL-backed with `period=today|last7Days|last30Days|custom` (custom also requires inclusive `startDate`/`endDate` in `YYYY-MM-DD`). Its ranges use the organization IANA timezone and invalid query input fails closed to today. It renders only implemented Phase 1 metrics: today’s jobs, in-progress jobs, completed jobs, **completed-job revenue**, average ticket, lead conversion, and missed appointments. **completed-job revenue** is the engineering working assumption pending owner confirmation: the integer-cent sum of `actualRevenueCents` for jobs completed in the selected period — it is not paid-invoice revenue. Invoice balances, payment revenue, and TimeEntry-based utilization remain Phase 2 work.
 
 ### Slice 2 follow-up — members/settings mutation server actions
 
@@ -123,7 +123,7 @@ Invoices, payments, and billing workflows remain **Phase 2** work. Runtime autho
 - **Audit helper** (`src/server/audit/`): append-only AuditLog writes, JSON
   snapshots via `toAuditJson`, transactional `withAudit()`.
 - **App shell**: `(public)` sign-in/sign-up stubs, `(app)/[orgSlug]` layout with
-  org shell, dashboard placeholder and per-route `requirePermission` gates.
+  org shell, a real tenant-scoped KPI dashboard, and per-route `requirePermission` gates.
 - **Lib**: typed errors (`src/lib/errors.ts`), timezone-safe dates
   (`src/lib/dates.ts`), integer-cents money (`src/lib/money.ts`), Zod schemas
   (`src/lib/validation.ts`).
