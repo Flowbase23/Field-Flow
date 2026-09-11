@@ -12,7 +12,7 @@ design). Read it before changing schema or authz decisions.
 
 The tenant shell at `(app)/[orgSlug]` calls `requireOrg()` at the layout boundary and derives the effective role permissions from the local membership plus `RolePermission` overrides. Navigation is permission-filtered, while each page independently calls `requirePermission()` for defense in depth. Use `can(permissions, permission)` or `<RequirePermission>` for UI actions; server actions must still call `requirePermission()` and write an audit entry. The Members view is tenant-scoped and marks Clerk invitations/mutations **PENDING LIVE VERIFICATION** until Clerk keys are configured; self role/status changes are rejected by `canChangeMembership`.
 
-The Phase 1 dashboard at `/{orgSlug}/` is `DASHBOARD_READ`-gated and URL-backed with `period=today|last7Days|last30Days|custom` (custom also requires inclusive `startDate`/`endDate` in `YYYY-MM-DD`). Its ranges use the organization IANA timezone and invalid query input fails closed to today. It renders only implemented Phase 1 metrics: today’s jobs, in-progress jobs, completed jobs, **completed-job revenue**, average ticket, lead conversion, and missed appointments. **completed-job revenue** is the engineering working assumption pending owner confirmation: the integer-cent sum of `actualRevenueCents` for jobs completed in the selected period — it is not paid-invoice revenue. Invoice balances, payment revenue, and TimeEntry-based utilization remain Phase 2 work.
+The tenant KPI dashboard ships with the org shell but is specified with its metrics under **Slice 6** below.
 
 ### Slice 2 follow-up — members/settings mutation server actions
 
@@ -103,6 +103,34 @@ The existing tenant-safe Job foundation now has server-rendered App Router scree
 
 Invoices, payments, and billing workflows remain **Phase 2** work. Runtime authorization and database persistence remain PENDING LIVE VERIFICATION until Clerk keys, a provisioned organization, and a live database are configured; this README does not claim live Clerk or database verification.
 
+## Slice 6 — KPI dashboard & hardening gate
+
+### Slice 6a — dashboard
+
+The tenant KPI dashboard lives at `/{orgSlug}/` (the org shell's index page) and is `DASHBOARD_READ`-gated.
+
+| Route | Permission | What it does |
+|---|---|---|
+| `/{orgSlug}/` | `DASHBOARD_READ` | URL-backed KPI dashboard: `period=today\|last7Days\|last30Days\|custom` (custom also requires inclusive `startDate`/`endDate` in `YYYY-MM-DD`); invalid query input fails closed to `today` |
+
+- **Timezone model**: the organization's IANA timezone defines day/period boundaries, converted to UTC instants before any query; DST-safe (a local day is not assumed to have 24 hours — the same `src/lib/dates.ts` helpers power the schedule).
+- **Metric definitions** (all tenant-scoped): today's jobs (non-cancelled JOB appointments overlapping today), in-progress jobs (`IN_PROGRESS`), completed jobs in period (`completedAt` in range), **completed-job revenue**, average ticket (revenue ÷ completed jobs), lead conversion (`WON` with `wonAt` in range ÷ leads created in range), missed appointments in period.
+- **completed-job revenue is the engineering working assumption pending owner confirmation**: the integer-cent sum of `actualRevenueCents` for jobs completed in the selected period — it is NOT paid-invoice revenue. Invoice balances, payment revenue, and TimeEntry-based utilization remain Phase 2 work.
+- Implementation: `src/server/services/operations-dashboard-metrics.service.ts` + `src/lib/dates.ts` range utilities; every count/aggregate carries its own `organizationId` predicate (unit-tested in `tests/operations-dashboard-metrics.test.ts` and swept again in `tests/authorization/cross-tenant-predicates.test.ts`).
+
+### Slice 6b — hardening gate
+
+- **`docs/runbook.md`** — operational reference: setup, env vars, DB workflow (`generate`/`validate`/`migrate dev`/`migrate deploy`/guarded seed; never `db push` on a shared DB), build/test commands, the machine-reset restore procedure for this workspace, and the live-verification checklist.
+- **`tests/authorization/`** — runnable WITHOUT Clerk or a database (in-memory fakes only):
+  - `require-org.test.ts` — the session→tenant gate: unauthorized/forbidden paths (no session, no org, unprovisioned org/user, inactive membership), local-id (never Clerk-id) context, cross-org membership invisibility, `requirePermission`/`requireRole`, and per-org `RolePermission` override semantics (replace-not-merge, no cross-org leak). Uses `bun:test mock.module` — the gate is `bun test`; excluded from vitest (see `vitest.config.ts`).
+  - `role-permissions.test.ts` — the full role → permission matrix (least-privilege denials per role), schema-enum integrity, and the pure helpers (`hasRole`, `can`, `canChangeMembership`).
+  - `cross-tenant-predicates.test.ts` — the consolidated tenant-isolation suite: a predicate-injection sweep over every read/write of every tenant repository (customer, lead, location, membership, technician, appointment, job), a cross-tenant rejection suite (foreign rows invisible or `NotFoundError`/P2025), and a source contract asserting every server-action repo call passes an organizationId-derived tenant id behind a `require*` gate.
+- **`tests/integration/`** — intentionally empty and documented: live DB/Clerk integration tests land in the verification pass (gated on Clerk keys, a provisioned org, and a test database — see `docs/runbook.md` §7).
+
+Gate at this commit: `bun test` (178 passing), `bun run typecheck`, `DATABASE_URL=… bunx prisma validate`, and `npx next build --webpack` all green.
+
+**PENDING LIVE VERIFICATION:** live auth/webhook E2E, runtime DB writes, and cross-tenant rejection against live rows — blocked on Clerk keys, a provisioned organization, and a linked repository (checklist: `docs/runbook.md` §7). The `init` migration is applied to the provisioned Neon Postgres (`prisma migrate status` is clean); that is a schema fact, not a runtime verification.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.
@@ -118,8 +146,10 @@ Invoices, payments, and billing workflows remain **Phase 2** work. Runtime autho
   per-organization `RolePermission` overrides in `src/server/auth/permissions.ts`.
 - **Tenant-scoped DB layer**: Prisma singleton (`src/server/db/client.ts`) and
   `tenantDb(organizationId)` / repositories (`src/server/repositories/`) that
-  inject the org predicate on every query; `customerRepo` is the fully worked
-  example, other repos are explicit stubs (throw `NotImplementedError`).
+  inject the org predicate on every query; `customer.repo` is the fully worked
+  example, and Customer/Location/Lead/Membership/Technician/Appointment/Job
+  repos are fully implemented — only Invoice remains an explicit Phase 2 stub
+  (throws `NotImplementedError`).
 - **Audit helper** (`src/server/audit/`): append-only AuditLog writes, JSON
   snapshots via `toAuditJson`, transactional `withAudit()`.
 - **App shell**: `(public)` sign-in/sign-up stubs, `(app)/[orgSlug]` layout with
@@ -139,18 +169,23 @@ cp .env.example .env.local   # fill in real values
 bun run db:generate          # prisma generate (needs DATABASE_URL? no — generate doesn't)
 DATABASE_URL="postgresql://..." bun run db:validate
 bun run dev                  # dev server (requires Clerk keys at runtime)
-bun run build                # production build (typecheck + Turbopack)
+bun run build                # production build (typecheck + webpack; see machine notes)
 bun run start                # serve the build
 ```
 
-No live database exists yet, so nothing here connects to Postgres: `prisma
-validate` (schema check) and `next build` both pass without a real DATABASE_URL.
+`DATABASE_URL` targets a provisioned Neon Postgres and the initial migration
+(`prisma/migrations/20260805225341_init`) is applied there — `bunx prisma
+migrate status` reports the schema up to date. Clerk keys are NOT configured
+for this workspace yet, so live auth/webhook flows remain PENDING LIVE
+VERIFICATION; `bun test`, `prisma validate`, `bun run typecheck`, and
+`next build --webpack` all pass without them. Operational details live in
+`docs/runbook.md`.
 
 ### Environment variables
 
 | Variable | Required for | Notes |
 |---|---|---|
-| `DATABASE_URL` | Prisma CLI + runtime DB access | postgres://…; no DB provisioned yet |
+| `DATABASE_URL` | Prisma CLI + runtime DB access | provisioned Neon Postgres; `init` migration applied |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Browser (ClerkProvider, SignIn/Up) | Clerk dashboard → API keys |
 | `CLERK_SECRET_KEY` | Server (auth(), middleware) | Clerk dashboard → API keys |
 | `CLERK_WEBHOOK_SECRET` | Webhook signature verification | Clerk dashboard → Webhooks |
@@ -158,21 +193,25 @@ validate` (schema check) and `next build` both pass without a real DATABASE_URL.
 
 See `.env.example` for full comments.
 
-### Database migration workflow (when a DB exists)
+### Database migration workflow (provisioned Neon Postgres)
 
 1. Local: `DATABASE_URL=… bun run db:migrate` (wraps `prisma migrate dev`).
 2. CI/deploy: `DATABASE_URL=… bun run db:deploy` (wraps `prisma migrate deploy`).
-3. Never `prisma db push` on a shared database. Review destructive migrations.
-4. Commit every generated migration under `prisma/migrations/`.
+3. Check state anytime with `DATABASE_URL=… bunx prisma migrate status`.
+4. Never `prisma db push` on a shared database. Review destructive migrations.
+5. Commit every generated migration under `prisma/migrations/`.
 
 ## What's blocked on live credentials (pending live verification)
 
 Everything below is written and type-checks, but cannot be exercised without a
 real environment. All of these are marked `PENDING LIVE VERIFICATION` in code:
 
-1. `DATABASE_URL` — no Postgres exists; repositories/audit/webhook DB writes are
-   untested against a live database (cross-tenant rejection tests are planned in
-   `tests/` once a test DB exists).
+1. Runtime database verification — `DATABASE_URL` targets a provisioned Neon
+   Postgres with the `init` migration applied (`prisma migrate status` is
+   clean), but no application runtime write has been exercised:
+   repository/audit/webhook DB writes and cross-tenant rejection against live
+   rows remain pending the verification pass (`docs/runbook.md` §7). The unit
+   suites in `tests/` cover the same seams with in-memory fakes.
 2. `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` — ClerkProvider,
    sign-in/sign-up, `auth()`, `clerkMiddleware` throw without them; the
    requireOrg() request flow and middleware route protection must be verified
@@ -180,6 +219,8 @@ real environment. All of these are marked `PENDING LIVE VERIFICATION` in code:
 3. `CLERK_WEBHOOK_SECRET` — svix signature verification and the exact payload
    shapes of the webhook events must be verified against a real Clerk endpoint
    (types are taken from `@clerk/backend`).
+4. A linked remote repository — push/PR workflow and remote backup of `main`
+   are not set up yet (`docs/runbook.md` §7).
 
 ## Tenant isolation conventions (non-negotiable)
 
@@ -222,8 +263,9 @@ src/
 │   └── jobs/              (later slices — BullMQ behind this boundary)
 ├── lib/                   errors.ts, dates.ts, money.ts, validation.ts
 └── middleware.ts          Clerk route protection
-prisma/                    schema.prisma, migrations/ (none yet), seed.ts
-tests/                     planned integration/authorization suites (need a test DB)
+prisma/                    schema.prisma, migrations/ (20260805225341_init, applied to Neon), seed.ts
+docs/                      runbook.md (operational reference)
+tests/                     unit suites (in-memory fakes) incl. authorization/; integration/ reserved for the live-verification pass
 ```
 
 Deviation notes from the design tree: `globals.css` lives in `src/styles/`
@@ -234,14 +276,13 @@ moved accordingly.
 ## Machine-specific notes (this workspace only)
 
 - `/home` (fs0) is only 300 MB; `node_modules` and `.next` are symlinks to
-  `/var/tmp/ff-nm` and `/var/tmp/ff-next`. Recreating them after a wipe:
-  `mkdir -p /var/tmp/ff-nm /var/tmp/ff-next && ln -s /var/tmp/ff-nm node_modules && ln -s /var/tmp/ff-next .next`
-  then `bun install`. `/var/tmp/ff-nm/node_modules` is a self-symlink needed for
-  Node-based CLIs (prisma, next) to resolve packages under bun's flat layout —
-  re-create with `cd /var/tmp/ff-nm && ln -s . node_modules` if it disappears.
-  `/var/tmp/node_modules -> /var/tmp/ff-nm` is required for `next build`'s
-  page-data phase (built pages live under the symlinked `.next`); the build
-  wipes `.next` each run, so the symlink must live in `/var/tmp`, not in `.next`.
+  `/tmp/fieldflow/node_modules` and `/var/tmp/ff-next`, and
+  `/var/tmp/node_modules -> /tmp/fieldflow/node_modules` is required for
+  `next build`'s page-data phase (built pages live under the symlinked
+  `.next`; the build wipes `.next` each run, so that symlink must live in
+  `/var/tmp`, not inside `.next`). The full restore procedure after a machine
+  reset — including the bun cache dir and `bunx prisma generate` — is
+  `docs/runbook.md` §5.
 - Because Turbopack rejects the out-of-project `node_modules` symlink, the
   `build`/`dev` scripts pass `--webpack` (supported in Next 16).
 - Prisma is pinned to v6 because the ratified schema sketch targets the
