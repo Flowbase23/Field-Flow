@@ -13,6 +13,7 @@ import { createMembershipRepo, type MembershipRepo } from "./membership.repo";
 import { createAppointmentRepo, type AppointmentRepo } from "./appointment.repo";
 import { createTechnicianRepo, type TechnicianRepo } from "./technician.repo";
 import { createInvoiceRepo, type InvoiceRepo } from "./invoice.repo";
+import { createEstimateRepo, type EstimateRepo } from "./estimate.repo";
 import { createJobRepo, type JobRepo } from "./job.repo";
 type Client = Prisma.TransactionClient | PrismaClient;
 export interface TenantRepositories {
@@ -24,6 +25,7 @@ export interface TenantRepositories {
   appointments: AppointmentRepo; // Slice 4 — scheduling & calendar
   technicians: TechnicianRepo; // Slice 4 — technician assignment
   invoices: InvoiceRepo; // Phase 2 Slice P2-1 — invoicing
+  estimates: EstimateRepo; // Phase 2 Slice P2-2 — estimates
 }
 export function tenantRepositories(
   prisma: Client,
@@ -38,5 +40,6 @@ export function tenantRepositories(
     appointments: createAppointmentRepo(prisma, organizationId),
     technicians: createTechnicianRepo(prisma, organizationId),
     invoices: createInvoiceRepo(prisma, organizationId),
+    estimates: createEstimateRepo(prisma, organizationId),
   };
 }

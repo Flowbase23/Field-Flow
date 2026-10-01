@@ -45,6 +45,11 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "INVOICE_UPDATE",
   "INVOICE_DELETE",
   "INVOICE_STATUS_UPDATE",
+  "ESTIMATE_READ",
+  "ESTIMATE_CREATE",
+  "ESTIMATE_UPDATE",
+  "ESTIMATE_DELETE",
+  "ESTIMATE_STATUS_UPDATE",
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
@@ -63,8 +68,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "SCHEDULE_CREATE",
     "SCHEDULE_UPDATE",
     "SCHEDULE_DELETE",
-    // Dispatchers see invoices but never create or touch money documents.
+    // Dispatchers see invoices and estimates but never create or touch money documents.
     "INVOICE_READ",
+    "ESTIMATE_READ",
   ],
 
   // Technician: sees their own jobs/schedule and reports status.
@@ -91,12 +97,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "INVOICE_CREATE",
     "INVOICE_UPDATE",
     "INVOICE_STATUS_UPDATE",
+    "ESTIMATE_READ",
+    "ESTIMATE_CREATE",
+    "ESTIMATE_UPDATE",
+    "ESTIMATE_STATUS_UPDATE",
   ],
 
-  // Sales reps: work leads, read customers. They can read invoices but do not
-  // create them — quote-to-cash money documents start at the office/admin side
-  // for now (estimates are Slice P2-2 and may revisit this).
-  SALES_REP: ["CUSTOMER_READ", "LEAD_READ", "LEAD_CREATE", "LEAD_UPDATE", "INVOICE_READ"],
+  // Sales reps: work leads, read customers. They can read invoices and
+  // estimates but do not create them — quote-to-cash money documents start at
+  // the office/admin side for now.
+  SALES_REP: ["CUSTOMER_READ", "LEAD_READ", "LEAD_CREATE", "LEAD_UPDATE", "INVOICE_READ", "ESTIMATE_READ"],
 
   // Portal users: minimal read access, further scoped to their own records later.
   CUSTOMER_PORTAL_USER: ["CUSTOMER_READ", "JOB_READ", "SCHEDULE_READ"],

@@ -230,6 +230,79 @@ rest of the app — runtime behavior under real Clerk sessions lands with the sa
 live-verification pass as the Phase 1 slices. The permission migration is applied;
 that is a schema fact, not a runtime verification.
 
+## Slice P2-2 — Estimates
+Estimates mirror the Slice P2-1 invoice shape (amounts-only, no line items yet):
+a tenant-scoped repository, a server-authoritative status lifecycle,
+permission-gated server actions, and App Router screens. **Converting an ACCEPTED
+estimate into a Job is deliberately out of scope for this slice** — it is a
+focused follow-up so the estimate→job handoff (service location, number
+allocation, technician links) isn't half-built here.
+### Routes
+| Route | Permission | What it does |
+|---|---|---|
+| `/estimates` | `ESTIMATE_READ` | List with status filter (incl. derived EXPIRED), search (number/title/customer), pagination |
+| `/estimates/new` | `ESTIMATE_CREATE` | Create form → server action `createEstimate` (starts in DRAFT) |
+| `/estimates/[estimateId]` | `ESTIMATE_READ` (+ `ESTIMATE_UPDATE`/`ESTIMATE_STATUS_UPDATE` for controls) | Detail: title, money breakdown, lifecycle controls, edit link |
+| `/estimates/[estimateId]/edit` | `ESTIMATE_UPDATE` | Edit customer/job/title/validUntil/subtotal/tax → server action `updateEstimate` |
+### Permissions
+Five new `ESTIMATE_*` enum values added by migration `20261001225313_add_estimates`
+(already applied to Neon; `prisma migrate status` is clean). Default role grants —
+per-org `RolePermission` overrides keep their replace-not-merge semantics:
+| Permission | OWNER / ADMIN | OFFICE_STAFF | DISPATCHER | SALES_REP | TECHNICIAN / PORTAL |
+|---|---|---|---|---|---|
+| `ESTIMATE_READ` | ✔ | ✔ | ✔ | ✔ | — |
+| `ESTIMATE_CREATE` | ✔ | ✔ | — | — | — |
+| `ESTIMATE_UPDATE` | ✔ | ✔ | — | — | — |
+| `ESTIMATE_STATUS_UPDATE` | ✔ | ✔ | — | — | — |
+| `ESTIMATE_DELETE` | ✔ | — | — | — | — |
+`ESTIMATE_DELETE` is granted to owner/admin only and has **no action or UI yet** —
+`VOID` is the exit path in this slice (same pattern as `INVOICE_DELETE`).
+### Status lifecycle (server-enforced, `src/server/domain/estimate-status.ts`)
+```
+DRAFT ─→ SENT ─→ ACCEPTED
+  │        └─→ DECLINED
+  └─→ VOID          (ACCEPTED / DECLINED / VOID terminal)
+```
+- Reaching SENT/ACCEPTED/DECLINED stamps `sentAt`/`acceptedAt`/`declinedAt`
+  (system-set, never client-supplied). There is no back-to-draft path: corrections
+  after SENT go through a new estimate.
+- `setStatus` is the only code path that writes `Estimate.status`. It validates the
+  transition map, then applies an optimistic tenant-scoped `updateMany` guarded on
+  the observed status — `count === 0` → `ConflictError`, never a silent overwrite.
+- **EXPIRED is derived, not settable.** There is no `EXPIRED` transition target and
+  `setStatus` rejects it; `effectiveEstimateStatus` computes it on read when a SENT
+  estimate is past `validUntil`. Nothing ever persists EXPIRED — but the list
+  filter accepts it (mapped server-side to `status = SENT AND validUntil < now`).
+- The UI offers only `allowedNextEstimateStatuses(current)` (via
+  `src/features/estimates/estimate-ui.ts`); the server action independently
+  re-enforces the map.
+### Money & tenant-safety rules
+- `totalCents = subtotalCents + taxCents` is recomputed **server-side on every
+  write** (`recomputeEstimateTotals`). The browser can send only
+  customer/job/title/validUntil/subtotal/tax; the total, status, lifecycle stamps,
+  and `estimateNumber` are dropped from update payloads (injection-attempt tested).
+- `update` writes through a tenant-scoped `updateMany`
+  (`where: { id, organizationId }`); `estimateNumber` is allocated **org-locally**
+  under the per-org advisory lock inside the create transaction, via `$executeRaw`
+  (void-column gotcha, commit `ff04182`).
+- Actions `getEstimate` / `createEstimate` / `updateEstimate` / `setEstimateStatus`
+  (`src/features/estimates/server/estimate.actions.ts`) all start from
+  `requirePermission(...)`, validate with the shared Zod schemas, reach the DB only
+  through the tenant-scoped repo, and write their audit row in the same
+  transaction (CREATE / UPDATE / STATUS_CHANGED with before/after snapshots).
+### Tests
+`tests/estimate-transitions.test.ts` (pure transition map + EXPIRED derivation),
+`tests/estimate-schemas.test.ts` (Zod valid/invalid), `tests/estimate-repository.test.ts`
+(tenant guards, protected-field injection, number allocation, money recompute,
+optimistic guard), `tests/authorization/estimate-actions.test.ts`
+(permission/audit/tenant seams), plus updated `role-permissions` and
+`cross-tenant-predicates` suites covering the new permissions and the estimate
+repo's predicate injection surface.
+**PENDING LIVE VERIFICATION:** the estimate pages/actions are session-gated like
+the rest of the app — runtime behavior under real Clerk sessions lands with the
+same live-verification pass as the Phase 1 slices. The migration is applied; that
+is a schema fact, not a runtime verification.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.
