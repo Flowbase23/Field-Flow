@@ -11,6 +11,7 @@ const NAV_ITEMS: readonly { href: string; label: string; permission: Permission 
   { href: "leads", label: "Leads", permission: "LEAD_READ" },
   { href: "schedule", label: "Schedule", permission: "SCHEDULE_READ" },
   { href: "jobs", label: "Jobs", permission: "JOB_READ" },
+  { href: "invoices", label: "Invoices", permission: "INVOICE_READ" },
   { href: "settings", label: "Settings", permission: "ORGANIZATION_READ" },
   { href: "settings/members", label: "Members", permission: "MEMBERS_READ" },
 ];

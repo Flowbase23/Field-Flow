@@ -76,6 +76,12 @@ describe("role → permission defaults matrix", () => {
       ["SALES_REP", "CUSTOMER_READ"],
       ["SALES_REP", "LEAD_CREATE"],
       ["SALES_REP", "LEAD_UPDATE"],
+      ["OFFICE_STAFF", "INVOICE_READ"],
+      ["OFFICE_STAFF", "INVOICE_CREATE"],
+      ["OFFICE_STAFF", "INVOICE_UPDATE"],
+      ["OFFICE_STAFF", "INVOICE_STATUS_UPDATE"],
+      ["DISPATCHER", "INVOICE_READ"],
+      ["SALES_REP", "INVOICE_READ"],
       ["CUSTOMER_PORTAL_USER", "CUSTOMER_READ"],
       ["CUSTOMER_PORTAL_USER", "JOB_READ"],
       ["CUSTOMER_PORTAL_USER", "SCHEDULE_READ"],
@@ -101,6 +107,17 @@ describe("role → permission defaults matrix", () => {
       ["SALES_REP", "JOB_READ"],
       ["SALES_REP", "CUSTOMER_CREATE"],
       ["SALES_REP", "SCHEDULE_CREATE"],
+      ["DISPATCHER", "INVOICE_CREATE"],
+      ["DISPATCHER", "INVOICE_UPDATE"],
+      ["DISPATCHER", "INVOICE_DELETE"],
+      ["DISPATCHER", "INVOICE_STATUS_UPDATE"],
+      ["TECHNICIAN", "INVOICE_READ"],
+      ["TECHNICIAN", "INVOICE_CREATE"],
+      ["OFFICE_STAFF", "INVOICE_DELETE"],
+      ["SALES_REP", "INVOICE_CREATE"],
+      ["SALES_REP", "INVOICE_UPDATE"],
+      ["SALES_REP", "INVOICE_DELETE"],
+      ["CUSTOMER_PORTAL_USER", "INVOICE_READ"],
       ["CUSTOMER_PORTAL_USER", "MEMBERS_MANAGE"],
       ["CUSTOMER_PORTAL_USER", "LEAD_READ"],
       ["CUSTOMER_PORTAL_USER", "DASHBOARD_READ"],
@@ -110,11 +127,28 @@ describe("role → permission defaults matrix", () => {
     }
   });
 
-  it("does not grant invoicing permissions that do not exist yet (Phase 2)", () => {
+  it("defines exactly five INVOICE_* permissions (payments come in Slice P2-3)", () => {
     const invoicePermissions = ALL_PERMISSIONS.filter(
       (permission) => permission.includes("INVOICE") || permission.includes("PAYMENT"),
     );
-    expect(invoicePermissions).toEqual([]);
+    expect(invoicePermissions).toEqual([
+      "INVOICE_READ",
+      "INVOICE_CREATE",
+      "INVOICE_UPDATE",
+      "INVOICE_DELETE",
+      "INVOICE_STATUS_UPDATE",
+    ]);
+  });
+  it("keeps INVOICE_DELETE to owner/admin — office staff runs the day-to-day desk only", () => {
+    for (const role of ["OWNER", "ADMIN"] as const) {
+      for (const permission of ["INVOICE_READ", "INVOICE_CREATE", "INVOICE_UPDATE", "INVOICE_DELETE", "INVOICE_STATUS_UPDATE"]) {
+        expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain(permission);
+      }
+    }
+    expect(DEFAULT_ROLE_PERMISSIONS.OFFICE_STAFF).not.toContain("INVOICE_DELETE");
+    expect(DEFAULT_ROLE_PERMISSIONS.DISPATCHER).not.toContain("INVOICE_CREATE");
+    expect(DEFAULT_ROLE_PERMISSIONS.TECHNICIAN.every((permission) => !permission.includes("INVOICE"))).toBe(true);
+    expect(DEFAULT_ROLE_PERMISSIONS.CUSTOMER_PORTAL_USER.every((permission) => !permission.includes("INVOICE"))).toBe(true);
   });
 });
 

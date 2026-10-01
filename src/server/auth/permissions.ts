@@ -40,6 +40,11 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "SCHEDULE_DELETE",
   "DASHBOARD_READ",
   "AUDIT_READ",
+  "INVOICE_READ",
+  "INVOICE_CREATE",
+  "INVOICE_UPDATE",
+  "INVOICE_DELETE",
+  "INVOICE_STATUS_UPDATE",
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
@@ -58,14 +63,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "SCHEDULE_CREATE",
     "SCHEDULE_UPDATE",
     "SCHEDULE_DELETE",
+    // Dispatchers see invoices but never create or touch money documents.
+    "INVOICE_READ",
   ],
 
   // Technician: sees their own jobs/schedule and reports status.
   // (Data scoping to "own records" is enforced in the repositories, Slice 4/5.)
   TECHNICIAN: ["JOB_READ", "JOB_STATUS_UPDATE", "SCHEDULE_READ"],
 
-  // Office staff: CRM read/write, jobs read/write, scheduling read.
-  // Invoicing permissions do not exist yet (Phase 2); they will be granted here.
+  // Office staff: CRM read/write, jobs read/write, scheduling read, and the
+  // day-to-day invoicing desk (no invoice deletion — that stays owner/admin).
   OFFICE_STAFF: [
     "DASHBOARD_READ",
     "CUSTOMER_READ",
@@ -80,10 +87,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "JOB_CREATE",
     "JOB_UPDATE",
     "SCHEDULE_READ",
+    "INVOICE_READ",
+    "INVOICE_CREATE",
+    "INVOICE_UPDATE",
+    "INVOICE_STATUS_UPDATE",
   ],
 
-  // Sales reps: work leads, read customers.
-  SALES_REP: ["CUSTOMER_READ", "LEAD_READ", "LEAD_CREATE", "LEAD_UPDATE"],
+  // Sales reps: work leads, read customers. They can read invoices but do not
+  // create them — quote-to-cash money documents start at the office/admin side
+  // for now (estimates are Slice P2-2 and may revisit this).
+  SALES_REP: ["CUSTOMER_READ", "LEAD_READ", "LEAD_CREATE", "LEAD_UPDATE", "INVOICE_READ"],
 
   // Portal users: minimal read access, further scoped to their own records later.
   CUSTOMER_PORTAL_USER: ["CUSTOMER_READ", "JOB_READ", "SCHEDULE_READ"],
