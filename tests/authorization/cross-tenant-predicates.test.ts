@@ -30,6 +30,7 @@ import { describe, expect, it } from "vitest";
 import { NotFoundError } from "@/lib/errors";
 import { createAppointmentRepo } from "@/server/repositories/appointment.repo";
 import { createCustomerRepo } from "@/server/repositories/customer.repo";
+import { createInvoiceRepo } from "@/server/repositories/invoice.repo";
 import { createJobRepo } from "@/server/repositories/job.repo";
 import { createLeadRepo } from "@/server/repositories/lead.repo";
 import { createLocationRepo } from "@/server/repositories/location.repo";
@@ -56,6 +57,7 @@ const MODELS = [
   "job",
   "jobTechnician",
   "auditLog",
+  "invoice",
 ] as const;
 
 /** Models that are deliberately global (no organizationId column). */
@@ -80,7 +82,16 @@ function mentionsOrg(node: unknown, org: string): boolean {
  */
 function recordingDb() {
   const calls: Call[] = [];
-  const universalRow = { id: "row-1", customerId: "cust-1", locationId: "loc-1", isActive: true };
+  const universalRow = {
+    id: "row-1",
+    customerId: "cust-1",
+    locationId: "loc-1",
+    isActive: true,
+    // Invoice fields so the status transition map can run on the fake row.
+    status: "DRAFT",
+    balanceCents: 0,
+    paidCents: 0,
+  };
 
   function makeModelProxy(model: string) {
     return new Proxy(
@@ -291,6 +302,22 @@ describe("cross-tenant predicate sweep — every repository read/write carries o
     );
   });
 
+  it("invoice.repo", async () => {
+    await sweep(
+      "invoice",
+      (db) => createInvoiceRepo(db, ORG),
+      [
+        ["list", (repo) => repo.list({ status: "DRAFT", search: "12" })],
+        ["count", (repo) => repo.count()],
+        ["getById", (repo) => repo.getById("row-1")],
+        ["getDetail", (repo) => repo.getDetail("row-1")],
+        ["create", (repo) => repo.create({ customerId: "cust-1", subtotalCents: 100, taxCents: 8 })],
+        ["update", (repo) => repo.update("row-1", { subtotalCents: 200 })],
+        ["setStatus", (repo) => repo.setStatus("row-1", "SENT")],
+        ["setStatus same status (no-op)", (repo) => repo.setStatus("row-1", "DRAFT")],
+      ],
+    );
+  });
   it("operations dashboard metrics service keeps its own tenant predicate on every aggregate", async () => {
     // Covered in depth by tests/operations-dashboard-metrics.test.ts; asserted
     // here so this suite remains the single consolidated tenant-safety index.
@@ -362,6 +389,7 @@ function crossTenantDb() {
     membership: [{ id: "mem-1", organizationId: OTHER, userId: "u1", isActive: true, role: "ADMIN" }],
     job: [{ id: "job-1", organizationId: OTHER, customerId: "cust-1", locationId: "loc-1", status: "DRAFT" }],
     appointment: [{ id: "apt-1", organizationId: OTHER }],
+    invoice: [{ id: "inv-1", organizationId: OTHER, customerId: "cust-1", invoiceNumber: 1, status: "DRAFT", balanceCents: 0, paidCents: 0 }],
   });
 }
 
@@ -425,6 +453,15 @@ describe("cross-tenant rejection — other-org rows are invisible or rejected", 
     expect(await repo.getById("apt-1")).toBeNull();
   });
 
+  it("invoice.getById returns null and setStatus throws NotFoundError for a foreign invoice", async () => {
+    const repo = createInvoiceRepo(crossTenantDb() as never, ORG);
+    expect(await repo.getById("inv-1")).toBeNull();
+    await expect(repo.setStatus("inv-1", "SENT")).rejects.toBeInstanceOf(NotFoundError);
+  });
+  it("invoice.update via a foreign compound id throws NotFoundError (pre-checked)", async () => {
+    const repo = createInvoiceRepo(crossTenantDb() as never, ORG);
+    await expect(repo.update("inv-1", { subtotalCents: 1 })).rejects.toBeInstanceOf(NotFoundError);
+  });
   it("control: the same operations succeed in-org", async () => {
     const db = rejectionDb({
       customer: [{ id: "cust-1", organizationId: ORG, isActive: true, lastName: "Local" }],

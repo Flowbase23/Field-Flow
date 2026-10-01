@@ -101,7 +101,8 @@ The existing tenant-safe Job foundation now has server-rendered App Router scree
 - Job detail shows assigned technicians (including the explicit primary designation) and job-linked appointments. Roles without `JOB_ASSIGN` get a read-only assignment view; roles without `SCHEDULE_READ` do not receive appointment details. The **Schedule appointment** action uses the existing shared scheduler with a tenant-validated job and service-location prefill.
 - Appointment creates/updates validate optional job links and require a job-linked appointment to use that job's in-tenant service location (and therefore its customer). Job-detail appointment reads are tenant-scoped and displayed with existing organization timezone utilities.
 
-Invoices, payments, and billing workflows remain **Phase 2** work. Runtime authorization and database persistence remain PENDING LIVE VERIFICATION until Clerk keys, a provisioned organization, and a live database are configured; this README does not claim live Clerk or database verification.
+Invoices landed in Slice P2-1 above; payments and billing workflows remain
+Phase 2 work (P2·S3). Runtime authorization and database persistence remain PENDING LIVE VERIFICATION until Clerk keys, a provisioned organization, and a live database are configured; this README does not claim live Clerk or database verification.
 
 ## Slice 6 — KPI dashboard & hardening gate
 
@@ -131,6 +132,104 @@ Gate at this commit: `bun test` (178 passing), `bun run typecheck`, `DATABASE_UR
 
 **PENDING LIVE VERIFICATION:** live auth/webhook E2E, runtime DB writes, and cross-tenant rejection against live rows — blocked on Clerk keys, a provisioned organization, and a linked repository (checklist: `docs/runbook.md` §7). The `init` migration is applied to the provisioned Neon Postgres (`prisma migrate status` is clean); that is a schema fact, not a runtime verification.
 
+## Slice P2-1 — Invoices (first Phase 2 slice)
+
+Invoices replace the Phase 1 stub (`src/server/repositories/stubs.ts` is gone): a
+tenant-scoped repository, a server-authoritative status lifecycle, permission-gated
+server actions, and App Router screens. These are **money documents only — payments
+and Stripe land in P2·S3**. Nothing in this slice records a payment: `paidCents` is
+never written by user input, and balances are recomputed against the row's stored
+`paidCents` (0 for a fresh invoice).
+
+### Routes
+
+| Route | Permission | What it does |
+|---|---|---|
+| `/invoices` | `INVOICE_READ` | List with status filter, search (invoice number or customer name), pagination |
+| `/invoices/new` | `INVOICE_CREATE` | Create form → server action `createInvoice` (starts in DRAFT) |
+| `/invoices/[invoiceId]` | `INVOICE_READ` (+ `INVOICE_UPDATE`/`INVOICE_STATUS_UPDATE` for controls) | Detail: money breakdown, lifecycle controls, edit link |
+| `/invoices/[invoiceId]/edit` | `INVOICE_UPDATE` | Edit customer/job/dates/subtotal/tax → server action `updateInvoice` |
+
+### Permissions
+
+Five new `INVOICE_*` enum values added by migration
+`20261001220034_add_invoice_permissions` (already applied to Neon; `prisma migrate
+status` is clean). Default role grants — per-org `RolePermission` overrides keep
+their replace-not-merge semantics:
+
+| Permission | OWNER / ADMIN | OFFICE_STAFF | DISPATCHER | SALES_REP | TECHNICIAN / PORTAL |
+|---|---|---|---|---|---|
+| `INVOICE_READ` | ✔ | ✔ | ✔ | ✔ | — |
+| `INVOICE_CREATE` | ✔ | ✔ | — | — | — |
+| `INVOICE_UPDATE` | ✔ | ✔ | — | — | — |
+| `INVOICE_STATUS_UPDATE` | ✔ | ✔ | — | — | — |
+| `INVOICE_DELETE` | ✔ | — | — | — | — |
+
+`INVOICE_DELETE` is granted to owner/admin only but has **no action or UI yet** —
+this slice offers `VOID` (terminal status) instead of deletion; the permission is
+reserved for a future delete flow. Dispatchers and sales reps read invoices but
+never create or edit money documents (technicians get neither read nor write).
+
+### Status lifecycle (server-enforced, `src/server/domain/invoice-status.ts`)
+
+```
+DRAFT ─→ SENT ─→ PARTIALLY_PAID ─→ PAID
+  │        │            │
+  └────────┴────────────┴─→ VOID   (never from PAID/VOID; PAID and VOID terminal)
+```
+
+- `PAID` only when `balanceCents` reaches 0; reaching it stamps `paidAt`
+  (system-set, never client-supplied). A full payment may skip `PARTIALLY_PAID`
+  (`SENT → PAID` is legal). `PARTIALLY_PAID` requires `paidCents > 0` **and** an
+  outstanding balance — until payments land in P2·S3 nothing raises `paidCents`
+  above 0, so the balance rules keep `PAID`/`PARTIALLY_PAID` out of reach rather
+  than permit a lie (a zero-total invoice being the degenerate exception).
+- `setStatus` is the only code path that writes `Invoice.status`. It validates the
+  transition map, then applies an optimistic tenant-scoped `updateMany` guarded on
+  the observed status — `count === 0` → `ConflictError`, never a silent overwrite.
+- **OVERDUE is derived, not settable.** There is no `OVERDUE` transition target and
+  `setStatus` rejects it; `effectiveInvoiceStatus` computes it on read when a
+  SENT/PARTIALLY_PAID invoice is past `dueAt` with an outstanding balance. Nothing
+  ever persists OVERDUE.
+- The UI offers only `allowedNextInvoiceStatuses(current, moneyContext)` (via
+  `src/features/invoices/invoice-ui.ts`); the server action independently
+  re-enforces the map and balance rules.
+
+### Money & tenant-safety rules
+
+- `totalCents = subtotalCents + taxCents` and `balanceCents = totalCents − paidCents`
+  are recomputed **server-side on every write** (`recomputeInvoiceTotals`). The
+  browser can send only customer/job/dates/subtotal/tax; totals, balances, status,
+  `paidCents`, `paidAt`, and `invoiceNumber` are dropped from update payloads
+  (covered by an injection-attempt test).
+- `update` writes through a tenant-scoped `updateMany`
+  (`where: { id, organizationId }`) instead of the compound `id_organizationId`
+  unique selector, so the write itself stays tenant-scoped even if the row moved
+  between the pre-check and the write.
+- `invoiceNumber` is allocated **org-locally** under the per-org advisory lock
+  (`pg_advisory_xact_lock(hashtext(orgId))`) inside the create transaction — via
+  `$executeRaw`, not `$queryRaw`, because the lock returns `void` and `$queryRaw`
+  cannot deserialize a void column against live Postgres (see commit `ff04182`).
+- Actions `getInvoice` / `createInvoice` / `updateInvoice` / `setInvoiceStatus`
+  (`src/features/invoices/server/invoice.actions.ts`) all start from
+  `requirePermission(...)`, validate with the shared Zod schemas, reach the DB only
+  through the tenant-scoped repo, and write their audit row in the same
+  transaction (CREATE / UPDATE / STATUS_CHANGED with before/after snapshots).
+
+### Tests
+
+`tests/invoice-transitions.test.ts` (pure transition map + balance rules),
+`tests/invoice-schemas.test.ts` (Zod valid/invalid), `tests/invoice-repository.test.ts`
+(tenant guards, protected-field injection, number allocation, money recompute),
+`tests/authorization/invoice-actions.test.ts` (permission/audit/tenant seams), plus
+updated `role-permissions` and `cross-tenant-predicates` suites covering the new
+permissions and the invoice repo's predicate injection surface.
+
+**PENDING LIVE VERIFICATION:** the invoice pages/actions are session-gated like the
+rest of the app — runtime behavior under real Clerk sessions lands with the same
+live-verification pass as the Phase 1 slices. The permission migration is applied;
+that is a schema fact, not a runtime verification.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.
@@ -148,8 +247,8 @@ Gate at this commit: `bun test` (178 passing), `bun run typecheck`, `DATABASE_UR
   `tenantDb(organizationId)` / repositories (`src/server/repositories/`) that
   inject the org predicate on every query; `customer.repo` is the fully worked
   example, and Customer/Location/Lead/Membership/Technician/Appointment/Job
-  repos are fully implemented — only Invoice remains an explicit Phase 2 stub
-  (throws `NotImplementedError`).
+  repos are fully implemented, and Invoice landed in Slice P2-1 (the
+  `NotImplementedError` stub is gone).
 - **Audit helper** (`src/server/audit/`): append-only AuditLog writes, JSON
   snapshots via `toAuditJson`, transactional `withAudit()`.
 - **App shell**: `(public)` sign-in/sign-up stubs, `(app)/[orgSlug]` layout with
@@ -250,20 +349,20 @@ real environment. All of these are marked `PENDING LIVE VERIFICATION` in code:
 src/
 ├── app/
 │   ├── (public)/          sign-in, sign-up, "/"
-│   ├── (app)/[orgSlug]/   org shell: dashboard, customers, leads, schedule, jobs, settings
+│   ├── (app)/[orgSlug]/   org shell: dashboard, customers, leads, schedule, jobs, invoices, settings
 │   └── api/webhooks/clerk/  Clerk sync webhook (svix-verified)
 ├── components/            ui/ (shadcn), layout/ (org shell), providers (TanStack Query)
-├── features/              dashboard, customers, leads, jobs, schedule, organizations, users
+├── features/              dashboard, customers, leads, jobs, schedule, invoices, organizations, users
 ├── server/
 │   ├── auth/              require-org.ts, permissions.ts
 │   ├── db/                client.ts (singleton), tenant-db.ts
-│   ├── repositories/      customer.repo.ts (worked example) + stubs
+│   ├── repositories/      customer.repo.ts (worked example) + per-model repos incl. invoice.repo.ts
 │   ├── audit/             append-only audit writes
 │   ├── services/          (later slices)
 │   └── jobs/              (later slices — BullMQ behind this boundary)
 ├── lib/                   errors.ts, dates.ts, money.ts, validation.ts
 └── middleware.ts          Clerk route protection
-prisma/                    schema.prisma, migrations/ (20260805225341_init, applied to Neon), seed.ts
+prisma/                    schema.prisma, migrations/ (20260805225341_init, 20261001220034_add_invoice_permissions — both applied to Neon), seed.ts
 docs/                      runbook.md (operational reference)
 tests/                     unit suites (in-memory fakes) incl. authorization/; integration/ reserved for the live-verification pass
 ```
