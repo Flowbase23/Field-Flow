@@ -108,11 +108,11 @@ function recordingDb() {
     );
   }
 
-  /** A real Prisma transaction client has models + $queryRaw but NO $transaction. */
+  /** A real Prisma transaction client has models + $executeRaw but NO $transaction. */
   function makeClient(withTransaction: boolean) {
     const client: any = {};
     for (const model of MODELS) client[model] = makeModelProxy(model);
-    client.$queryRaw = async () => []; // pg advisory lock in job.repo
+    client.$executeRaw = async () => 0; // pg advisory lock in job.repo
     if (withTransaction) {
       client.$transaction = async (fn: (tx: unknown) => unknown) => fn(makeClient(false));
     }

@@ -107,7 +107,13 @@ export function createJobRepo(prisma: Client, organizationId: string): JobRepo {
 
   async function createInTransaction(data: JobCreateData): Promise<Job> {
     await assertRelations(data);
-    await prisma.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${organizationId}))`);
+    // $executeRaw, NOT $queryRaw: pg_advisory_xact_lock() returns `void` and
+    // $queryRaw fails to deserialize a void column against live Postgres
+    // (Prisma "Failed to deserialize column of type 'void'" — surfaced by the
+    // live Neon verification pass; in-memory fakes never hit it). The lock has
+    // no result set — $executeRaw runs the statement inside the transaction
+    // and ignores the (empty) result.
+    await prisma.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${organizationId}))`);
     const latest = await prisma.job.findFirst({ where: tenant, orderBy: { jobNumber: "desc" }, select: { jobNumber: true } });
     return prisma.job.create({ data: { ...tenant, ...data, jobNumber: (latest?.jobNumber ?? 0) + 1, status: "DRAFT", priority: data.priority ?? "NORMAL", subtotalCents: data.subtotalCents ?? 0, taxCents: data.taxCents ?? 0, totalCents: data.totalCents ?? 0 } });
   }

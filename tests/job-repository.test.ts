@@ -26,7 +26,7 @@ function makePrisma() {
   const locks = vi.fn().mockResolvedValue([]);
 
   const prisma = {
-    $queryRaw: locks,
+    $executeRaw: locks,
     customer: { findFirst: vi.fn(async ({ where }: { where: { id: string; organizationId: string } }) => customers.find((row) => row.id === where.id && row.organizationId === where.organizationId) ?? null) },
     location: { findFirst: vi.fn(async ({ where }: { where: { id: string; organizationId: string } }) => locations.find((row) => row.id === where.id && row.organizationId === where.organizationId) ?? null) },
     lead: { findFirst: vi.fn(async ({ where }: { where: { id: string; organizationId: string } }) => leads.find((row) => row.id === where.id && row.organizationId === where.organizationId) ?? null) },
@@ -97,7 +97,7 @@ describe("Job repository tenant/relation guards", () => {
 
   it("opens a transaction before allocating a number when composed from a Prisma client", async () => {
     const { prisma } = makePrisma();
-    const tx = { $queryRaw: prisma.$queryRaw, customer: prisma.customer, location: prisma.location, lead: prisma.lead, job: prisma.job };
+    const tx = { $executeRaw: prisma.$executeRaw, customer: prisma.customer, location: prisma.location, lead: prisma.lead, job: prisma.job };
     const transaction = vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx));
     Object.assign(prisma, { $transaction: transaction });
 

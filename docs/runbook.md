@@ -118,7 +118,7 @@ symlink (`/tmp/fieldflow/node_modules`). Next 16 supports
 `next build --webpack` / `next dev --webpack`; the `build`/`dev` scripts in
 `package.json` already pass it. Do not remove the flag.
 
-## 7. Live-verification checklist — the remaining Phase 1 pass (NOT done)
+## 7. Live-verification checklist — the remaining Phase 1 pass (DB runtime items now done — see §8; Clerk/remote items remain)
 
 Everything below is written and unit-tested with in-memory fakes, but has not
 been exercised against real infrastructure. **Do not mark Phase 1 complete
@@ -144,15 +144,60 @@ until each line passes.** Regression baseline first: `bun test`,
 
 ### Blocked on a test database (plus the Clerk items above)
 
-- [ ] Runtime DB writes: repository create/update/delete, audit rows written
-      in the SAME transaction as mutations, against live Postgres. (The `init`
-      migration is applied to the provisioned Neon instance — that proves the
-      schema, not the application runtime.)
-- [ ] Cross-tenant rejection against live rows: real P2025s on compound
-      `id_organizationId` selectors and real count-guard behavior.
+- [x] Runtime DB writes: repository create/update/delete, audit rows written
+      in the SAME transaction as mutations, against live Postgres. — DONE for
+      repository writes through `tenantDb(organizationId)` (persistence +
+      cross-tenant round-trips proven live by §8; the Clerk/webhook-driven
+      write paths and audit-in-transaction still await live Clerk).
+- [x] Cross-tenant rejection against live rows: real P2025s on compound
+      `id_organizationId` selectors and real count-guard behavior. — DONE,
+      see §8 (scripts/verify-live-db.ts, 31/31 assertions).
 - [ ] Run integration tests against a dedicated TEST database — never the
       shared provisioned Neon instance.
 
 ### Blocked on a linked remote repository
 
 - [ ] Remote backup of `main`; push/PR workflow established.
+
+## 8. Live-database verification script (`scripts/verify-live-db.ts`)
+
+Proves runtime persistence and cross-tenant isolation against the REAL
+provisioned Postgres (Neon) — completing the two "Blocked on a test database"
+items of §7. It is a standalone maintenance script, NOT part of the `bun test`
+suite (the suite runs in-memory, without a database); do not wire it into
+`package.json`'s test script or vitest.
+
+Run (with `DATABASE_URL` exported — the provisioned Neon instance):
+
+```bash
+bun scripts/verify-live-db.ts
+```
+
+What it does — every row it creates is labelled with the marker
+`zzverify-<epoch>` (org slugs, Clerk org/user ids, customer/location/job text):
+
+1. Sweeps leftovers of any previous crashed run (re-runs are idempotent).
+2. Creates two labelled organizations (A and B), one user + one active OWNER
+   membership each, then — through `tenantDb(organizationId)` and the
+   repositories, exactly as application code does — a customer + service
+   location + job under org A (org-local jobNumber allocation included).
+3. Asserts (31 checks): created rows round-trip field-for-field; org B reads
+   of org A rows return null/empty (getById/getDetail/list/count across
+   customers, locations, jobs, memberships); org B writes fail closed —
+   `jobs.create` with A's customer/location → repo `NotFoundError`,
+   `customers.setActive/update` → real Prisma P2025 on the compound
+   `id_organizationId` selector, `jobs.updateStatus`/`memberships.updateRole`
+   → count-guard `NotFoundError` — and A's rows are unchanged afterwards.
+4. In a `finally`, deletes every created row in FK-safe order (job → location
+   → customer → membership → user → organization, the organization delete
+   cascading residue) and verifies ZERO residual marker rows — Neon is left
+   clean regardless of assertion outcomes. If a run dies before cleanup,
+   simply re-run: step 1 sweeps the marker rows.
+
+Last full result (2026-10-01): 31/31 assertions passed, 0 residual rows.
+That run also surfaced and fixed a live-only bug the in-memory tests could
+never catch: `$queryRaw` cannot deserialize the `void` column returned by
+`pg_advisory_xact_lock()` ("Failed to deserialize column of type 'void'"),
+so `job.repo.ts` now acquires the lock with `$executeRaw` (which ignores the
+empty result set). Job creation was silently broken against live Postgres
+until then.
