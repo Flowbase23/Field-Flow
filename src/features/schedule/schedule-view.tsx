@@ -43,7 +43,7 @@ interface ScheduleViewClientProps {
   technicians: SerializedTechnician[];
   selectedTechIds: string[];
   locations: { id: string; label: string }[];
-  jobs: { id: string; title: string; locationId: string }[];
+  jobs: { id: string; title: string; locationId: string | null }[];
   /** Optional tenant-validated job-detail launch payload. */
   initialCreate?: AppointmentFormInitial | null;
   canCreate: boolean;

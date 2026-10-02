@@ -16,7 +16,8 @@ export interface JobCustomerOption {
 
 export interface JobFormInitial {
   customerId: string;
-  locationId: string;
+  /** Nullable since the P2-2 follow-up: converted jobs can start location-less. */
+  locationId: string | null;
   title: string;
   type: string;
   priority: string;

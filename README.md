@@ -303,6 +303,52 @@ the rest of the app — runtime behavior under real Clerk sessions lands with th
 same live-verification pass as the Phase 1 slices. The migration is applied; that
 is a schema fact, not a runtime verification.
 
+### Slice P2-2 follow-up — Convert ACCEPTED estimate → Job
+
+Closes the estimates loop: an accepted estimate can now be turned into the work
+order it sold. Migration `20261002170000_convert_estimate_to_job` (applied to
+Neon) adds `Job.estimateId` (nullable, `SET NULL`, id-only FK per header note 1)
+with `@@unique([organizationId, estimateId])` — the conversion is once-only AT
+THE DATABASE LEVEL, so even concurrent double-converts lose and roll back whole
+(the repository maps that P2002 to `ConflictError`, after a friendly pre-check).
+It also relaxes `Job.locationId` to nullable.
+
+- **Action** `convertEstimateToJob` (`src/features/estimates/server/estimate.actions.ts`):
+  gated on **`JOB_CREATE`** as the primary gate — the observable effect is a new
+  job — plus **`ESTIMATE_READ`**, because estimate data flows into that job
+  (both are existing enum values; this pairing is the documented default and can
+  be changed without a migration). Job creation, the `Job.estimateId` marker,
+  the `Estimate.jobId` "Linked job" association, and one `Job`-CREATE audit row
+  share a single transaction. The payload is only `{ id }` — every job field is
+  derived server-side, nothing is injectable.
+- **Mapping decisions** (server-derived, owner-overridable):
+  - **Job number**: the next org-local number via the exact manual-creation
+    scheme (per-org advisory lock + max + 1) — implemented by reusing the job
+    repo's `create` internals.
+  - **Service location**: the Estimate model carries no address/site field, so
+    the only unambiguous source is the estimate's customer's locations — the job
+    links one **only when the customer has exactly one**; otherwise the job
+    starts location-less and the user picks it from the job edit form. Job list
+    and detail render "Not set yet" for location-less jobs. If estimates gain an
+    address later, `createFromEstimate` is the derivation hook.
+  - **Technicians**: none — the job starts unassigned (DRAFT, `SERVICE_CALL`).
+  - **Title**: the estimate's title, else `Estimate #<number>` (Job.title is
+    required; Estimate.title is nullable).
+  - **Money**: `quotedAmountCents = estimate.totalCents` (the accepted quote)
+    and the estimate's server-computed subtotal/tax/total copied verbatim.
+- **UI**: the estimate detail page shows a "Convert to job" card only for an
+  ACCEPTED estimate without an existing conversion (`EstimateDetail.convertedJob`
+  reads the `Job.estimateId` marker, not the user-settable Linked-job field),
+  and only to roles holding `JOB_CREATE`; after conversion the card becomes a
+  link to the new job (`convert-to-job-button.tsx`).
+- **Tests** (+15): `tests/estimate-conversion.test.ts` (repo mapping, location
+  derivation incl. cross-tenant isolation, once-only, non-ACCEPTED, cross-tenant
+  id, P2002→ConflictError) and `tests/authorization/estimate-convert.test.ts`
+  (bun: JOB_CREATE/ESTIMATE_READ gates, cross-tenant NOT_FOUND, non-ACCEPTED,
+  happy-path mapping + single Job-CREATE audit row with
+  `convertedFromEstimateId`). bun test: **388 pass / 0 fail**; typecheck, `prisma
+  validate`, and `next build --webpack` all green.
+
 ## What's built (Slice 1)
 
 - **Next.js 16 (App Router) + TypeScript (strict) + Tailwind v4 + shadcn/ui** shell.

@@ -7,12 +7,15 @@
 "use server";
 import { AuditAction, Permission } from "@prisma/client";
 import { revalidatePath } from "next/cache";
-import { actionError, NotFoundError, type ActionResult } from "@/lib/errors";
+import { actionError, ForbiddenError, NotFoundError, type ActionResult } from "@/lib/errors";
 import { toAuditJson, writeAuditLog } from "@/server/audit";
+import { hasPermission } from "@/server/auth/permissions";
 import { requirePermission } from "@/server/auth/require-org";
 import { db } from "@/server/db/client";
+import { createJobRepo } from "@/server/repositories/job.repo";
 import { createEstimateRepo } from "@/server/repositories/estimate.repo";
 import {
+  estimateConvertSchema,
   estimateCreateSchema,
   estimateReadSchema,
   estimateStatusUpdateSchema,
@@ -202,6 +205,103 @@ export async function setEstimateStatus(input: unknown): Promise<ActionResult<Es
         totalCents: result.estimate.totalCents,
       },
     };
+  } catch (err) {
+    return actionError(err);
+  }
+}
+
+/** Result payload for the estimate → job conversion (the UI links to the job). */
+export interface ConvertEstimateToJobResult {
+  estimateId: string;
+  jobId: string;
+  jobNumber: number;
+  jobTitle: string;
+}
+
+/**
+ * Audit snapshot of the job a conversion created. Mirrors the shape of the
+ * job feature's create snapshot (job.actions.ts keeps its helper private —
+ * "use server" modules can only export async server functions), so the audit
+ * trail of a converted job reads like any other job-creation entry.
+ */
+function convertedJobSnapshot(job: {
+  jobNumber: number;
+  customerId: string;
+  locationId: string | null;
+  type: string;
+  priority: string;
+  status: string;
+  title: string;
+  description: string | null;
+  quotedAmountCents: number | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+}) {
+  return {
+    jobNumber: job.jobNumber,
+    customerId: job.customerId,
+    locationId: job.locationId,
+    type: job.type,
+    priority: job.priority,
+    status: job.status,
+    title: job.title,
+    description: job.description,
+    quotedAmountCents: job.quotedAmountCents,
+    subtotalCents: job.subtotalCents,
+    taxCents: job.taxCents,
+    totalCents: job.totalCents,
+  };
+}
+
+/**
+ * Converts an ACCEPTED estimate into a new Job (Phase 2 Slice P2-2 follow-up).
+ *
+ * Permission gate: JOB_CREATE is the primary gate — the observable effect of a
+ * conversion is a new job in the org — and ESTIMATE_READ is additionally
+ * required because the action reads estimate data into that job (both names are
+ * existing enum values; the pairing is the documented default and can be
+ * overridden later without a migration).
+ *
+ * The job creation, the conversion marker (Job.estimateId), the linked-job
+ * association (Estimate.jobId) and the CREATE audit row share ONE transaction.
+ * The once-only rule is enforced by @@unique([organizationId, estimateId]):
+ * the repository pre-checks for a friendly message, and a concurrent second
+ * convert loses at the unique index, rolls back whole, and surfaces as
+ * CONFLICT. The estimate keeps its ACCEPTED status — the conversion is recorded
+ * on the job side, never by mutating the lifecycle.
+ */
+export async function convertEstimateToJob(input: unknown): Promise<ActionResult<ConvertEstimateToJobResult>> {
+  try {
+    const ctx = await requirePermission(Permission.JOB_CREATE);
+    // The conversion also consumes an estimate; hold its read permission too.
+    if (!(await hasPermission(ctx.organizationId, ctx.membership.role, Permission.ESTIMATE_READ))) {
+      throw new ForbiddenError(
+        `Missing permission: ${Permission.ESTIMATE_READ}. Your role (${ctx.membership.role}) does not allow this.`,
+      );
+    }
+    const { id } = estimateConvertSchema.parse(input);
+    const job = await db.$transaction(async (tx) => {
+      const created = await createJobRepo(tx, ctx.organizationId).createFromEstimate(id);
+      await writeAuditLog(
+        {
+          organizationId: ctx.organizationId,
+          action: AuditAction.CREATE,
+          entityType: "Job",
+          entityId: created.id,
+          before: toAuditJson(null),
+          after: toAuditJson(convertedJobSnapshot(created)),
+          metadata: toAuditJson({ convertedFromEstimateId: id }),
+          actorUserId: ctx.userId,
+          actorClerkUserId: ctx.clerkUserId,
+        },
+        tx,
+      );
+      return created;
+    });
+    revalidateEstimates(ctx.organization.slug, id);
+    revalidatePath(`/${ctx.organization.slug}/jobs`);
+    return { ok: true, data: { estimateId: id, jobId: job.id, jobNumber: job.jobNumber, jobTitle: job.title } };
   } catch (err) {
     return actionError(err);
   }
