@@ -50,6 +50,10 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "ESTIMATE_UPDATE",
   "ESTIMATE_DELETE",
   "ESTIMATE_STATUS_UPDATE",
+  "PAYMENT_READ",
+  "PAYMENT_CREATE",
+  "PAYMENT_REFUND",
+  "PAYMENT_VOID",
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
@@ -68,9 +72,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "SCHEDULE_CREATE",
     "SCHEDULE_UPDATE",
     "SCHEDULE_DELETE",
-    // Dispatchers see invoices and estimates but never create or touch money documents.
+    // Dispatchers see invoices, estimates and payments but never touch money.
     "INVOICE_READ",
     "ESTIMATE_READ",
+    "PAYMENT_READ",
   ],
 
   // Technician: sees their own jobs/schedule and reports status.
@@ -101,12 +106,16 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "ESTIMATE_CREATE",
     "ESTIMATE_UPDATE",
     "ESTIMATE_STATUS_UPDATE",
+    // Office staff runs the payment desk: record payments, read the ledger.
+    // Refund/void stay owner/admin (money-moving corrections).
+    "PAYMENT_READ",
+    "PAYMENT_CREATE",
   ],
 
   // Sales reps: work leads, read customers. They can read invoices and
   // estimates but do not create them — quote-to-cash money documents start at
   // the office/admin side for now.
-  SALES_REP: ["CUSTOMER_READ", "LEAD_READ", "LEAD_CREATE", "LEAD_UPDATE", "INVOICE_READ", "ESTIMATE_READ"],
+  SALES_REP: ["CUSTOMER_READ", "LEAD_READ", "LEAD_CREATE", "LEAD_UPDATE", "INVOICE_READ", "ESTIMATE_READ", "PAYMENT_READ"],
 
   // Portal users: minimal read access, further scoped to their own records later.
   CUSTOMER_PORTAL_USER: ["CUSTOMER_READ", "JOB_READ", "SCHEDULE_READ"],

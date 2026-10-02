@@ -13,20 +13,27 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { InvoiceStatusControls } from "@/features/invoices/invoice-status-controls";
 import { invoiceStatusActions } from "@/features/invoices/invoice-ui";
+import { StripeCheckoutButton } from "@/features/payments/stripe-checkout-button";
+import { isStripeConfigured } from "@/server/stripe/adapter";
+import { paymentStatusLabel } from "@/server/domain/payment-status";
 import { formatDateInTz } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
 
-/** Tenant-safe invoice detail: amounts, customer/job links, lifecycle controls. */
+/** Tenant-safe invoice detail: amounts, customer/job links, lifecycle controls, payments. */
 export const dynamic = "force-dynamic";
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ orgSlug: string; invoiceId: string }> }) {
   const { invoiceId } = await params;
   const ctx = await requirePermission(Permission.INVOICE_READ);
   const permissions = await permissionsFor(ctx.organizationId, ctx.membership.role);
   const repos = tenantDb(ctx.organizationId);
-  const invoice = await repos.invoices.getDetail(invoiceId);
+  const [invoice, payments] = await Promise.all([
+    repos.invoices.getDetail(invoiceId),
+    repos.payments.listForInvoice(invoiceId),
+  ]);
   if (!invoice) notFound();
   const canUpdate = canPermission(permissions, Permission.INVOICE_UPDATE);
   const canChangeStatus = canPermission(permissions, Permission.INVOICE_STATUS_UPDATE);
+  const canCreatePayment = canPermission(permissions, Permission.PAYMENT_CREATE);
   // OVERDUE is derived on read — the stored status never changes to OVERDUE.
   const displayStatus = effectiveInvoiceStatus(invoice.status, invoice.dueAt, invoice.balanceCents);
   const customerName = (invoice.customer.companyName ?? [invoice.customer.firstName, invoice.customer.lastName].filter(Boolean).join(" ")) || "Customer";
@@ -61,7 +68,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           ? <p><span className="text-muted-foreground">Linked job</span><br /><Link href={`/${ctx.organization.slug}/jobs/${invoice.job.id}`} className="font-medium text-primary hover:underline">#{invoice.job.jobNumber} · {invoice.job.title}</Link></p>
           : <p><span className="text-muted-foreground">Linked job</span><br /><span className="text-muted-foreground">None</span></p>}
       </CardContent></Card>
-      <Card><CardHeader><CardTitle>Amounts</CardTitle><CardDescription>Computed server-side in integer cents. Payments are Slice P2-3 — paid amounts stay until then.</CardDescription></CardHeader>
+      <Card><CardHeader><CardTitle>Amounts</CardTitle><CardDescription>Computed server-side in integer cents. Payments update paid and balance through the P2-3 ledger — the client never sets them.</CardDescription></CardHeader>
       <CardContent><dl className="space-y-2 text-sm">
         <Amount label="Subtotal" value={invoice.subtotalCents} currency={currency} />
         <Amount label="Tax" value={invoice.taxCents} currency={currency} />
@@ -71,6 +78,30 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       </dl></CardContent></Card>
     </div>
     {displayStatus === "OVERDUE" && <Card><CardContent className="text-sm text-destructive">This invoice is past its due date with an outstanding balance. Its stored status remains {invoiceStatusLabel(invoice.status)} — OVERDUE is derived on read.</CardContent></Card>}
+    <Card>
+      <CardHeader><CardTitle>Payments</CardTitle><CardDescription>Immutable ledger entries applied to this invoice. Refunds and voids reverse their reconcile automatically.</CardDescription></CardHeader>
+      <CardContent className="space-y-4">
+        {payments.length === 0
+          ? <p className="text-sm text-muted-foreground">No payments recorded yet.</p>
+          : <div className="overflow-x-auto rounded-lg border"><table className="w-full text-left text-sm">
+            <thead className="border-b text-xs uppercase tracking-wide text-muted-foreground"><tr><th className="px-3 py-2">Amount</th><th className="px-3 py-2">Method</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Applied</th><th className="px-3 py-2"></th></tr></thead>
+            <tbody className="divide-y">{payments.map((payment) => <tr key={payment.id}>
+              <td className="px-3 py-2 font-medium">{formatMoney(payment.amountCents, currency)}</td>
+              <td className="px-3 py-2 text-muted-foreground">{payment.method.replaceAll("_", " ").toLowerCase()}</td>
+              <td className="px-3 py-2">{paymentStatusLabel(payment.status)}</td>
+              <td className="px-3 py-2 text-muted-foreground">{formatDateInTz(payment.appliedAt, ctx.organization.timezone, "short")}</td>
+              <td className="px-3 py-2"><Link href={`/${ctx.organization.slug}/payments/${payment.id}`} className="text-primary hover:underline">View</Link></td>
+            </tr>)}</tbody>
+          </table></div>}
+        {canCreatePayment && <div className="flex flex-wrap items-center gap-3">
+          {invoice.balanceCents > 0
+            ? <Link href={`/${ctx.organization.slug}/payments/new?invoice=${invoice.id}`} className={buttonVariants({ variant: "default", size: "sm" })}>Record payment</Link>
+            : <span className="text-sm text-muted-foreground">Fully applied — no outstanding balance.</span>}
+          {isStripeConfigured() && invoice.balanceCents > 0 && <StripeCheckoutButton invoiceId={invoice.id} />}
+        </div>}
+        {canCreatePayment && !isStripeConfigured() && invoice.balanceCents > 0 && <p className="text-xs text-muted-foreground">Online checkout activates once Stripe keys are added to the deployment secrets.</p>}
+      </CardContent>
+    </Card>
     <Card><CardHeader><CardTitle>Activity timestamps</CardTitle></CardHeader><CardContent><dl className="grid gap-3 text-sm sm:grid-cols-2">{timestamps.map(([label, date]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="font-medium">{date ? formatDateInTz(date, ctx.organization.timezone, "medium") : "—"}</dd></div>)}</dl></CardContent></Card>
   </div>;
 }
