@@ -33,7 +33,7 @@ export interface JobActionResult {
 function jobSnapshot(job: {
   jobNumber?: number;
   customerId: string;
-  locationId: string;
+  locationId: string | null; // converted jobs can start without a location
   leadId: string | null;
   type: string;
   priority: string;

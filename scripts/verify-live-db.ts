@@ -322,7 +322,7 @@ async function main(): Promise<void> {
     const jobDetail = await tenantA.jobs.getDetail(jobA.id);
     await expectTruthy(
       "job detail joins the right customer + location",
-      !!jobDetail && jobDetail.customer.id === customerA.id && jobDetail.location.id === locationA.id,
+      !!jobDetail && jobDetail.customer.id === customerA.id && jobDetail.location?.id === locationA.id,
       jobDetail ? "nested customer/location ids match" : "job detail read back as null",
     );
 

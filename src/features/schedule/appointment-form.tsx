@@ -52,7 +52,7 @@ export function AppointmentForm({
   initial?: AppointmentFormInitial;
   technicians: SerializedTechnician[];
   locations: { id: string; label: string }[];
-  jobs: { id: string; title: string; locationId: string }[];
+  jobs: { id: string; title: string; locationId: string | null }[];
   showAllowOverlap: boolean;
 }) {
   const router = useRouter();
@@ -245,7 +245,8 @@ export function AppointmentForm({
               <span className={labelClass}>Linked job</span>
               <select {...register("jobId", { onChange: (event) => {
                 const selected = jobs.find((job) => job.id === event.target.value);
-                if (selected) form.setValue("locationId", selected.locationId, { shouldValidate: true });
+                // A converted job can have no location yet — empty clears the preselect.
+                if (selected) form.setValue("locationId", selected.locationId ?? "", { shouldValidate: true });
               } })} className={inputClass}>
                 <option value="">None</option>
                 {jobs.map((j) => <option key={j.id} value={j.id}>{j.title}</option>)}

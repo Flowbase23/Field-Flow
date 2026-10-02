@@ -74,8 +74,16 @@ export const estimateUpdateSchema = z.object(estimateFormFields).strict();
 export const estimateUpdateActionSchema = z.object({ id: cuidSchema, ...estimateUpdateSchema.shape }).strict();
 export const estimateStatusUpdateSchema = z.object({ id: cuidSchema, status: estimateSettableStatusSchema }).strict();
 export const estimateReadSchema = z.object({ id: cuidSchema }).strict();
+/**
+ * Convert-to-job payload: the estimate id is the ONLY client-supplied value.
+ * Every job field (number, customer, location, money, title) is derived
+ * server-side by the job repository's createFromEstimate, so there is nothing
+ * else to validate or inject here.
+ */
+export const estimateConvertSchema = z.object({ id: cuidSchema }).strict();
 
 export type EstimateCreateInput = z.infer<typeof estimateCreateSchema>;
 export type EstimateUpdateInput = z.infer<typeof estimateUpdateSchema>;
 export type EstimateUpdateActionInput = z.infer<typeof estimateUpdateActionSchema>;
 export type EstimateStatusUpdateInput = z.infer<typeof estimateStatusUpdateSchema>;
+export type EstimateConvertInput = z.infer<typeof estimateConvertSchema>;

@@ -12,6 +12,7 @@ import { can as canPermission } from "@/components/permission-gate";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EstimateStatusControls } from "@/features/estimates/estimate-status-controls";
+import { ConvertToJobButton } from "@/features/estimates/convert-to-job-button";
 import { estimateStatusActions } from "@/features/estimates/estimate-ui";
 import { formatDateInTz } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
@@ -27,6 +28,7 @@ export default async function EstimateDetailPage({ params }: { params: Promise<{
   if (!estimate) notFound();
   const canUpdate = canPermission(permissions, Permission.ESTIMATE_UPDATE);
   const canChangeStatus = canPermission(permissions, Permission.ESTIMATE_STATUS_UPDATE);
+  const canCreateJobs = canPermission(permissions, Permission.JOB_CREATE);
   // EXPIRED is derived on read — the stored status never changes to EXPIRED.
   const displayStatus = effectiveEstimateStatus(estimate.status, estimate.validUntil);
   const customerName = (estimate.customer.companyName ?? [estimate.customer.firstName, estimate.customer.lastName].filter(Boolean).join(" ")) || "Customer";
@@ -55,6 +57,21 @@ export default async function EstimateDetailPage({ params }: { params: Promise<{
       <CardHeader><CardTitle>Lifecycle</CardTitle><CardDescription>Move this estimate through its allowed states. The server verifies every transition and stamps sent/accepted/declined itself; EXPIRED is derived automatically from the valid-until date and is never a button.</CardDescription></CardHeader>
       <CardContent><EstimateStatusControls estimateId={estimate.id} currentStatus={estimate.status} actions={estimateStatusActions(estimate.status)} /></CardContent>
     </Card>}
+    {/* Conversion (P2-2 follow-up): shown only for an ACCEPTED estimate that has
+        not been converted yet. `convertedJob` reads the Job.estimateId marker —
+        not the user-settable "Linked job" field — so a hand-linked estimate is
+        not mistaken for a conversion. The server action re-checks everything. */}
+    {estimate.convertedJob ? <Card>
+      <CardHeader><CardTitle>Converted to job</CardTitle><CardDescription>This estimate was turned into a work order; the conversion is recorded once and cannot be repeated.</CardDescription></CardHeader>
+      <CardContent className="text-sm">
+        <Link href={`/${ctx.organization.slug}/jobs/${estimate.convertedJob.id}`} className="font-medium text-primary hover:underline">View job #{estimate.convertedJob.jobNumber} · {estimate.convertedJob.title}</Link>
+      </CardContent>
+    </Card>
+    : estimate.status === "ACCEPTED" && canCreateJobs && <Card>
+      <CardHeader><CardTitle>Convert to job</CardTitle><CardDescription>Turn this accepted estimate into a draft work order. The server copies the customer and amounts, allocates the next job number, records the conversion once, and links the new job back here.</CardDescription></CardHeader>
+      <CardContent><ConvertToJobButton estimateId={estimate.id} orgSlug={ctx.organization.slug} /></CardContent>
+    </Card>}
+    {estimate.status === "ACCEPTED" && !estimate.convertedJob && !canCreateJobs && <Card><CardContent className="text-sm text-muted-foreground">This estimate was accepted. A role with job-create permission can convert it into a work order.</CardContent></Card>}
     <div className="grid gap-6 md:grid-cols-2">
       <Card><CardHeader><CardTitle>Customer & job</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">
         <p><span className="text-muted-foreground">Customer</span><br /><Link href={`/${ctx.organization.slug}/customers/${estimate.customer.id}`} className="font-medium text-primary hover:underline">{customerName}</Link></p>

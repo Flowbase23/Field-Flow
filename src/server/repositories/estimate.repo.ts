@@ -57,6 +57,13 @@ export interface EstimateListItem extends Estimate {
 }
 export interface EstimateDetail extends EstimateListItem {
   job: Pick<Job, "id" | "jobNumber" | "title"> | null;
+  /**
+   * The job this estimate was CONVERTED into (Job.estimateId marker), if any.
+   * Distinct from `job` above, which is the user-settable "Linked job"
+   * association: a conversion sets both, but only `convertedJob` proves a
+   * conversion happened (a user can link an estimate to a job by hand).
+   */
+  convertedJob: Pick<Job, "id" | "jobNumber" | "title"> | null;
 }
 export interface EstimateRepo {
   list(params?: EstimateListParams): Promise<EstimateListItem[]>;
@@ -201,10 +208,15 @@ export function createEstimateRepo(prisma: Client, organizationId: string): Esti
       return prisma.estimate.findFirst({ where: { id, ...tenant } });
     },
     async getDetail(id) {
-      return prisma.estimate.findFirst({
+      const detail = await prisma.estimate.findFirst({
         where: { id, ...tenant },
-        include: { customer: { select: customerSelect }, job: { select: jobSelect } },
+        include: { customer: { select: customerSelect }, job: { select: jobSelect }, convertedJobs: { select: jobSelect } },
       });
+      if (!detail) return null;
+      // At most one converted job exists per estimate (compound unique on Job);
+      // the include is a list purely because the FK lives on the Job side. The
+      // optional chain keeps test fakes that don't model the include total.
+      return { ...detail, convertedJob: detail.convertedJobs?.[0] ?? null };
     },
     async create(data) {
       return isPrismaClient(prisma)

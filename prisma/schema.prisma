@@ -410,7 +410,10 @@ model Job {
   id                 String      @id @default(cuid())
   organizationId     String
   customerId         String
-  locationId         String
+  // Nullable since the P2-2 follow-up: jobs created by converting an accepted
+  // estimate can start WITHOUT a service location (the user fills it in later
+  // from the job edit form). Manually created jobs still always carry one.
+  locationId         String?
   leadId             String?
   jobNumber          Int
   type               JobType
@@ -430,17 +433,25 @@ model Job {
 
   organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   customer     Customer        @relation(fields: [customerId, organizationId], references: [id, organizationId])
-  location     Location        @relation(fields: [locationId, organizationId], references: [id, organizationId])
+  location     Location?       @relation(fields: [locationId, organizationId], references: [id, organizationId])
   // Optional link → id-only FK (see header note 1). Tenant predicate enforced by the Job repository.
   lead         Lead?           @relation(fields: [leadId], references: [id], onDelete: SetNull)
   technicians  JobTechnician[]
   appointments Appointment[]
   invoices     Invoice[]
-  estimates    Estimate[]
+  estimates    Estimate[]      @relation("EstimateJobLink")
   timeEntries  TimeEntry[]
+  // Conversion provenance (P2-2 follow-up): the job created from an ACCEPTED
+  // estimate records its origin here. id-only FK (see header note 1); the
+  // tenant predicate is enforced by the Job repository. The compound unique
+  // makes the conversion once-only AT THE DATABASE LEVEL — a second convert of
+  // the same estimate violates this index (the repo maps it to ConflictError).
+  estimateId   String?
+  estimate     Estimate?       @relation("EstimateConversion", fields: [estimateId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, jobNumber])
   @@unique([id, organizationId])
+  @@unique([organizationId, estimateId])
   @@index([organizationId, status, priority])
   @@index([organizationId, status, createdAt])
   @@index([organizationId, completedAt])
@@ -588,7 +599,11 @@ model Estimate {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
   // Optional link → id-only FK (see header note 1). Tenant predicate enforced by repositories.
-  job          Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  // Named "EstimateJobLink": the user-settable "estimate belongs to job" association.
+  job          Job?         @relation("EstimateJobLink", fields: [jobId], references: [id], onDelete: SetNull)
+  // Reverse of Job.estimate ("EstimateConversion"): the job this estimate was
+  // converted into, if any. At most one per organization (compound unique on Job).
+  convertedJobs Job[]       @relation("EstimateConversion")
 
   @@unique([organizationId, estimateNumber])
   @@index([organizationId, status, validUntil])

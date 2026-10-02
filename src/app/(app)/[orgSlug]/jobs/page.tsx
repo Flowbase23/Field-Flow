@@ -69,7 +69,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
         <tbody className="divide-y">{jobs.map((job) => <tr key={job.id} className="hover:bg-muted/40">
           <td className="px-4 py-3"><Link href={`/${ctx.organization.slug}/jobs/${job.id}`} className="font-medium text-primary hover:underline">#{job.jobNumber} · {job.title}</Link></td>
           <td className="px-4 py-3">{(job.customer.companyName ?? [job.customer.firstName, job.customer.lastName].filter(Boolean).join(" ")) || "Customer"}</td>
-          <td className="px-4 py-3 text-muted-foreground"><p>{job.location.label}</p><p className="text-xs">{job.location.city}, {job.location.state}</p></td>
+          <td className="px-4 py-3 text-muted-foreground">{job.location ? <><p>{job.location.label}</p><p className="text-xs">{job.location.city}, {job.location.state}</p></> : <span className="text-xs">Not set yet</span>}</td>
           <td className="px-4 py-3">{jobTypeLabel(job.type)}</td>
           <td className="px-4 py-3"><PriorityBadge priority={job.priority} /></td>
           <td className="px-4 py-3"><span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium">{jobStatusLabel(job.status)}</span></td>
