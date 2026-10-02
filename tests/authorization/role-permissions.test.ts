@@ -88,6 +88,10 @@ describe("role → permission defaults matrix", () => {
       ["OFFICE_STAFF", "ESTIMATE_STATUS_UPDATE"],
       ["DISPATCHER", "ESTIMATE_READ"],
       ["SALES_REP", "ESTIMATE_READ"],
+      ["OFFICE_STAFF", "PAYMENT_READ"],
+      ["OFFICE_STAFF", "PAYMENT_CREATE"],
+      ["DISPATCHER", "PAYMENT_READ"],
+      ["SALES_REP", "PAYMENT_READ"],
       ["CUSTOMER_PORTAL_USER", "CUSTOMER_READ"],
       ["CUSTOMER_PORTAL_USER", "JOB_READ"],
       ["CUSTOMER_PORTAL_USER", "SCHEDULE_READ"],
@@ -144,10 +148,8 @@ describe("role → permission defaults matrix", () => {
     }
   });
 
-  it("defines exactly five INVOICE_* permissions (payments come in Slice P2-3)", () => {
-    const invoicePermissions = ALL_PERMISSIONS.filter(
-      (permission) => permission.includes("INVOICE") || permission.includes("PAYMENT"),
-    );
+  it("defines exactly five INVOICE_* permissions", () => {
+    const invoicePermissions = ALL_PERMISSIONS.filter((permission) => permission.includes("INVOICE"));
     expect(invoicePermissions).toEqual([
       "INVOICE_READ",
       "INVOICE_CREATE",
@@ -155,6 +157,28 @@ describe("role → permission defaults matrix", () => {
       "INVOICE_DELETE",
       "INVOICE_STATUS_UPDATE",
     ]);
+  });
+  it("defines exactly four PAYMENT_* permissions (Slice P2-3 — immutable ledger, no PAYMENT_UPDATE)", () => {
+    const paymentPermissions = ALL_PERMISSIONS.filter((permission) => permission.includes("PAYMENT"));
+    expect(paymentPermissions).toEqual([
+      "PAYMENT_READ",
+      "PAYMENT_CREATE",
+      "PAYMENT_REFUND",
+      "PAYMENT_VOID",
+    ]);
+  });
+  it("keeps money corrections (PAYMENT_REFUND/PAYMENT_VOID) to owner/admin", () => {
+    for (const role of ["OWNER", "ADMIN"] as const) {
+      for (const permission of ["PAYMENT_READ", "PAYMENT_CREATE", "PAYMENT_REFUND", "PAYMENT_VOID"]) {
+        expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain(permission);
+      }
+    }
+    // Office staff runs the payment desk but corrections stay above it.
+    expect(DEFAULT_ROLE_PERMISSIONS.OFFICE_STAFF).not.toContain("PAYMENT_REFUND");
+    expect(DEFAULT_ROLE_PERMISSIONS.OFFICE_STAFF).not.toContain("PAYMENT_VOID");
+    expect(DEFAULT_ROLE_PERMISSIONS.DISPATCHER.every((permission) => !permission.startsWith("PAYMENT_") || permission === "PAYMENT_READ")).toBe(true);
+    expect(DEFAULT_ROLE_PERMISSIONS.TECHNICIAN.every((permission) => !permission.includes("PAYMENT"))).toBe(true);
+    expect(DEFAULT_ROLE_PERMISSIONS.CUSTOMER_PORTAL_USER.every((permission) => !permission.includes("PAYMENT"))).toBe(true);
   });
   it("keeps INVOICE_DELETE to owner/admin — office staff runs the day-to-day desk only", () => {
     for (const role of ["OWNER", "ADMIN"] as const) {

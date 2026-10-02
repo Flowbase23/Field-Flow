@@ -79,6 +79,10 @@ enum Permission {
   ESTIMATE_UPDATE
   ESTIMATE_DELETE
   ESTIMATE_STATUS_UPDATE
+  PAYMENT_READ
+  PAYMENT_CREATE
+  PAYMENT_REFUND
+  PAYMENT_VOID
 }
 
 enum CustomerType {
@@ -171,6 +175,28 @@ enum EstimateStatus {
   VOID
 }
 
+// Payment ledger (Phase 2 Slice P2-3). A Payment is an immutable money entry:
+// corrections go through REFUNDED/VOIDED, never through editing the amount.
+enum PaymentMethod {
+  CASH
+  CHECK
+  CARD
+  ACH
+  BANK_TRANSFER
+  OTHER
+}
+
+// PENDING exists for Stripe flows that confirm asynchronously (checkout
+// session / PaymentIntent created before the money settles). Manual payments
+// are recorded straight in SUCCEEDED; FAILED/REFUNDED/VOIDED are terminal.
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+  VOIDED
+}
+
 enum AuditAction {
   CREATE
   UPDATE
@@ -208,6 +234,7 @@ model Organization {
   appointments    Appointment[]
   invoices        Invoice[]
   estimates       Estimate[]
+  payments        Payment[]
   auditLogs       AuditLog[]
   rolePermissions RolePermission[]
   timeEntries     TimeEntry[]
@@ -228,7 +255,7 @@ model User {
   // One-to-many (not 1:1): the same user can be a Technician in several organizations —
   // Technician has @@unique([organizationId, userId]).
   technicians         Technician[]
-  auditLogs           AuditLog[] @relation("AuditActor")
+  auditLogs           AuditLog[]    @relation("AuditActor")
   createdAppointments Appointment[] @relation("AppointmentCreatedBy")
 }
 
@@ -284,6 +311,7 @@ model Customer {
   jobs         Job[]
   invoices     Invoice[]
   estimates    Estimate[]
+  payments     Payment[]
 
   // Compound unique so tenant-scoped relations (Location.customer, Job.customer, Invoice.customer)
   // can reference (id, organizationId) — design mechanism D.
@@ -313,8 +341,8 @@ model Location {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer      @relation(fields: [customerId, organizationId], references: [id, organizationId], onDelete: Cascade)
   jobs         Job[]
   appointments Appointment[]
 
@@ -355,18 +383,18 @@ model Lead {
 }
 
 model Technician {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   userId         String
   employeeCode   String?
-  skills         String[] @default([])
-  isActive       Boolean  @default(true)
+  skills         String[]  @default([])
+  isActive       Boolean   @default(true)
   hireDate       DateTime?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   jobs         JobTechnician[]
   appointments AppointmentTechnician[]
   timeEntries  TimeEntry[]
@@ -400,11 +428,11 @@ model Job {
   createdAt          DateTime    @default(now())
   updatedAt          DateTime    @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
-  location     Location     @relation(fields: [locationId, organizationId], references: [id, organizationId])
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer        @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  location     Location        @relation(fields: [locationId, organizationId], references: [id, organizationId])
   // Optional link → id-only FK (see header note 1). Tenant predicate enforced by the Job repository.
-  lead         Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  lead         Lead?           @relation(fields: [leadId], references: [id], onDelete: SetNull)
   technicians  JobTechnician[]
   appointments Appointment[]
   invoices     Invoice[]
@@ -427,8 +455,8 @@ model JobTechnician {
   isPrimary      Boolean  @default(false)
   assignedAt     DateTime @default(now())
 
-  job         Job         @relation(fields: [jobId, organizationId], references: [id, organizationId], onDelete: Cascade)
-  technician  Technician  @relation(fields: [technicianId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  job        Job        @relation(fields: [jobId, organizationId], references: [id, organizationId], onDelete: Cascade)
+  technician Technician @relation(fields: [technicianId, organizationId], references: [id, organizationId], onDelete: Cascade)
 
   @@id([jobId, technicianId])
   @@index([organizationId, technicianId, assignedAt])
@@ -455,11 +483,11 @@ model Appointment {
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Optional links → id-only FKs (see header note 1). Tenant predicate enforced by repositories.
-  job          Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  location     Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  createdBy    User?        @relation("AppointmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  job          Job?                    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  location     Location?               @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  createdBy    User?                   @relation("AppointmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
   technicians  AppointmentTechnician[]
 
   // Compound unique so AppointmentTechnician can reference (id, organizationId) — design mechanism D.
@@ -470,8 +498,8 @@ model Appointment {
 }
 
 model AppointmentTechnician {
-  appointmentId String
-  technicianId  String
+  appointmentId  String
+  technicianId   String
   organizationId String
 
   appointment Appointment @relation(fields: [appointmentId, organizationId], references: [id, organizationId], onDelete: Cascade)
@@ -482,16 +510,16 @@ model AppointmentTechnician {
 }
 
 model TimeEntry {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   organizationId String
   technicianId   String
   jobId          String?
   startedAt      DateTime
   endedAt        DateTime?
   minutes        Int?
-  billable       Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  billable       Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   technician   Technician   @relation(fields: [technicianId, organizationId], references: [id, organizationId])
@@ -504,29 +532,33 @@ model TimeEntry {
 
 // Phase 1 minimal Invoice (full workflows land in Phase 2).
 model Invoice {
-  id              String        @id @default(cuid())
-  organizationId  String
-  customerId      String
-  jobId           String?
-  invoiceNumber   Int
-  status          InvoiceStatus @default(DRAFT)
-  issuedAt        DateTime?
-  dueAt           DateTime?
-  paidAt          DateTime?
-  subtotalCents   Int           @default(0)
-  taxCents        Int           @default(0)
-  totalCents      Int           @default(0)
-  paidCents       Int           @default(0)
-  balanceCents    Int           @default(0)
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String        @id @default(cuid())
+  organizationId String
+  customerId     String
+  jobId          String?
+  invoiceNumber  Int
+  status         InvoiceStatus @default(DRAFT)
+  issuedAt       DateTime?
+  dueAt          DateTime?
+  paidAt         DateTime?
+  subtotalCents  Int           @default(0)
+  taxCents       Int           @default(0)
+  totalCents     Int           @default(0)
+  paidCents      Int           @default(0)
+  balanceCents   Int           @default(0)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
   // Optional link → id-only FK (see header note 1). Tenant predicate enforced by repositories.
   job          Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  payments     Payment[]
 
   @@unique([organizationId, invoiceNumber])
+  // Compound unique so tenant-scoped relations (Payment.invoice) can reference
+  // (id, organizationId) — design mechanism D.
+  @@unique([id, organizationId])
   @@index([organizationId, status, dueAt])
   @@index([organizationId, issuedAt])
   @@index([organizationId, paidAt])
@@ -536,22 +568,22 @@ model Invoice {
 // Phase 2 Slice P2-2 minimal Estimate (amounts-only like Invoice; line items
 // land with the convert-to-job / richer quoting work later in Phase 2).
 model Estimate {
-  id              String         @id @default(cuid())
-  organizationId  String
-  customerId      String
-  jobId           String?
-  estimateNumber  Int
-  status          EstimateStatus @default(DRAFT)
-  title           String?
-  validUntil      DateTime?
-  sentAt          DateTime?
-  acceptedAt      DateTime?
-  declinedAt      DateTime?
-  subtotalCents   Int            @default(0)
-  taxCents        Int            @default(0)
-  totalCents      Int            @default(0)
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id             String         @id @default(cuid())
+  organizationId String
+  customerId     String
+  jobId          String?
+  estimateNumber Int
+  status         EstimateStatus @default(DRAFT)
+  title          String?
+  validUntil     DateTime?
+  sentAt         DateTime?
+  acceptedAt     DateTime?
+  declinedAt     DateTime?
+  subtotalCents  Int            @default(0)
+  taxCents       Int            @default(0)
+  totalCents     Int            @default(0)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
@@ -562,6 +594,41 @@ model Estimate {
   @@index([organizationId, status, validUntil])
   @@index([organizationId, customerId])
   @@index([organizationId, jobId])
+}
+
+// Phase 2 Slice P2-3 Payment ledger. Payments are immutable money entries
+// against an invoice: the amount/status/ids are never client-settable, and
+// corrections go through REFUNDED/VOIDED. Creating/reversing one reconciles the
+// invoice (paidCents/balanceCents/status) in the SAME transaction — see
+// src/server/domain/payment-status.ts and src/server/repositories/payment.repo.ts.
+model Payment {
+  id                      String        @id @default(cuid())
+  organizationId          String
+  invoiceId               String
+  // Optional id-only FK (header note 1 — design mechanism B): the tenant
+  // predicate is enforced in the repository, like Invoice.job.
+  customerId              String?
+  amountCents             Int
+  method                  PaymentMethod
+  status                  PaymentStatus @default(SUCCEEDED)
+  // Stripe identifiers are system-set from verified webhooks/adapter results,
+  // never from the browser.
+  stripePaymentIntentId   String?
+  stripeCheckoutSessionId String?
+  notes                   String?
+  // System-set at record time (the moment the money is applied to the invoice).
+  appliedAt               DateTime      @default(now())
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+  organization            Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Compound FK (design mechanism D): Invoice carries @@unique([id, organizationId]).
+  invoice                 Invoice       @relation(fields: [invoiceId, organizationId], references: [id, organizationId])
+  customer                Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@unique([id, organizationId])
+  @@index([organizationId, status, appliedAt])
+  @@index([organizationId, invoiceId])
+  @@index([organizationId, customerId])
 }
 
 // Append-only by convention: app code never updates or deletes audit rows.
