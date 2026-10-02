@@ -30,6 +30,7 @@ import { describe, expect, it } from "vitest";
 import { NotFoundError } from "@/lib/errors";
 import { createAppointmentRepo } from "@/server/repositories/appointment.repo";
 import { createCustomerRepo } from "@/server/repositories/customer.repo";
+import { createEstimateRepo } from "@/server/repositories/estimate.repo";
 import { createInvoiceRepo } from "@/server/repositories/invoice.repo";
 import { createJobRepo } from "@/server/repositories/job.repo";
 import { createLeadRepo } from "@/server/repositories/lead.repo";
@@ -58,6 +59,7 @@ const MODELS = [
   "jobTechnician",
   "auditLog",
   "invoice",
+  "estimate",
 ] as const;
 
 /** Models that are deliberately global (no organizationId column). */
@@ -318,6 +320,22 @@ describe("cross-tenant predicate sweep — every repository read/write carries o
       ],
     );
   });
+  it("estimate.repo", async () => {
+    await sweep(
+      "estimate",
+      (db) => createEstimateRepo(db, ORG),
+      [
+        ["list", (repo) => repo.list({ status: "DRAFT", search: "12" })],
+        ["count", (repo) => repo.count()],
+        ["getById", (repo) => repo.getById("row-1")],
+        ["getDetail", (repo) => repo.getDetail("row-1")],
+        ["create", (repo) => repo.create({ customerId: "cust-1", subtotalCents: 100, taxCents: 8 })],
+        ["update", (repo) => repo.update("row-1", { subtotalCents: 200 })],
+        ["setStatus", (repo) => repo.setStatus("row-1", "SENT")],
+        ["setStatus same status (no-op)", (repo) => repo.setStatus("row-1", "DRAFT")],
+      ],
+    );
+  });
   it("operations dashboard metrics service keeps its own tenant predicate on every aggregate", async () => {
     // Covered in depth by tests/operations-dashboard-metrics.test.ts; asserted
     // here so this suite remains the single consolidated tenant-safety index.
@@ -390,6 +408,7 @@ function crossTenantDb() {
     job: [{ id: "job-1", organizationId: OTHER, customerId: "cust-1", locationId: "loc-1", status: "DRAFT" }],
     appointment: [{ id: "apt-1", organizationId: OTHER }],
     invoice: [{ id: "inv-1", organizationId: OTHER, customerId: "cust-1", invoiceNumber: 1, status: "DRAFT", balanceCents: 0, paidCents: 0 }],
+    estimate: [{ id: "est-1", organizationId: OTHER, customerId: "cust-1", estimateNumber: 1, status: "DRAFT", subtotalCents: 0, taxCents: 0, totalCents: 0 }],
   });
 }
 
@@ -462,6 +481,15 @@ describe("cross-tenant rejection — other-org rows are invisible or rejected", 
     const repo = createInvoiceRepo(crossTenantDb() as never, ORG);
     await expect(repo.update("inv-1", { subtotalCents: 1 })).rejects.toBeInstanceOf(NotFoundError);
   });
+  it("estimate.getById returns null and setStatus throws NotFoundError for a foreign estimate", async () => {
+    const repo = createEstimateRepo(crossTenantDb() as never, ORG);
+    expect(await repo.getById("est-1")).toBeNull();
+    await expect(repo.setStatus("est-1", "SENT")).rejects.toBeInstanceOf(NotFoundError);
+  });
+  it("estimate.update cannot touch a foreign estimate", async () => {
+    const repo = createEstimateRepo(crossTenantDb() as never, ORG);
+    await expect(repo.update("est-1", { subtotalCents: 1 })).rejects.toBeInstanceOf(NotFoundError);
+  });
   it("control: the same operations succeed in-org", async () => {
     const db = rejectionDb({
       customer: [{ id: "cust-1", organizationId: ORG, isActive: true, lastName: "Local" }],
@@ -478,7 +506,7 @@ describe("cross-tenant rejection — other-org rows are invisible or rejected", 
 /* Layer 3 — server-action source contract                             */
 /* ------------------------------------------------------------------ */
 
-const REPO_CALL = /create(?:Customer|Location|Lead|Job|Membership|Appointment|Technician|Invoice)Repo\(\s*[\w$.]+,\s*([\w$.]+)/g;
+const REPO_CALL = /create(?:Customer|Location|Lead|Job|Membership|Appointment|Technician|Invoice|Estimate)Repo\(\s*[\w$.]+,\s*([\w$.]+)/g;
 
 describe("server actions (src/features/*/server) — source contract", () => {
   function actionFiles(): string[] {

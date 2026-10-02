@@ -74,6 +74,11 @@ enum Permission {
   INVOICE_UPDATE
   INVOICE_DELETE
   INVOICE_STATUS_UPDATE
+  ESTIMATE_READ
+  ESTIMATE_CREATE
+  ESTIMATE_UPDATE
+  ESTIMATE_DELETE
+  ESTIMATE_STATUS_UPDATE
 }
 
 enum CustomerType {
@@ -155,6 +160,17 @@ enum InvoiceStatus {
   OVERDUE
 }
 
+// Estimate lifecycle (Phase 2 Slice P2-2). EXPIRED is DERIVED on read from a
+// past validUntil on a SENT estimate — it is never a persisted value, exactly
+// like OVERDUE for invoices.
+enum EstimateStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  DECLINED
+  VOID
+}
+
 enum AuditAction {
   CREATE
   UPDATE
@@ -191,6 +207,7 @@ model Organization {
   jobs            Job[]
   appointments    Appointment[]
   invoices        Invoice[]
+  estimates       Estimate[]
   auditLogs       AuditLog[]
   rolePermissions RolePermission[]
   timeEntries     TimeEntry[]
@@ -266,6 +283,7 @@ model Customer {
   leads        Lead[]
   jobs         Job[]
   invoices     Invoice[]
+  estimates    Estimate[]
 
   // Compound unique so tenant-scoped relations (Location.customer, Job.customer, Invoice.customer)
   // can reference (id, organizationId) — design mechanism D.
@@ -390,6 +408,7 @@ model Job {
   technicians  JobTechnician[]
   appointments Appointment[]
   invoices     Invoice[]
+  estimates    Estimate[]
   timeEntries  TimeEntry[]
 
   @@unique([organizationId, jobNumber])
@@ -512,6 +531,37 @@ model Invoice {
   @@index([organizationId, issuedAt])
   @@index([organizationId, paidAt])
   @@index([organizationId, customerId])
+}
+
+// Phase 2 Slice P2-2 minimal Estimate (amounts-only like Invoice; line items
+// land with the convert-to-job / richer quoting work later in Phase 2).
+model Estimate {
+  id              String         @id @default(cuid())
+  organizationId  String
+  customerId      String
+  jobId           String?
+  estimateNumber  Int
+  status          EstimateStatus @default(DRAFT)
+  title           String?
+  validUntil      DateTime?
+  sentAt          DateTime?
+  acceptedAt      DateTime?
+  declinedAt      DateTime?
+  subtotalCents   Int            @default(0)
+  taxCents        Int            @default(0)
+  totalCents      Int            @default(0)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer     @relation(fields: [customerId, organizationId], references: [id, organizationId])
+  // Optional link → id-only FK (see header note 1). Tenant predicate enforced by repositories.
+  job          Job?         @relation(fields: [jobId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, estimateNumber])
+  @@index([organizationId, status, validUntil])
+  @@index([organizationId, customerId])
+  @@index([organizationId, jobId])
 }
 
 // Append-only by convention: app code never updates or deletes audit rows.

@@ -82,6 +82,12 @@ describe("role → permission defaults matrix", () => {
       ["OFFICE_STAFF", "INVOICE_STATUS_UPDATE"],
       ["DISPATCHER", "INVOICE_READ"],
       ["SALES_REP", "INVOICE_READ"],
+      ["OFFICE_STAFF", "ESTIMATE_READ"],
+      ["OFFICE_STAFF", "ESTIMATE_CREATE"],
+      ["OFFICE_STAFF", "ESTIMATE_UPDATE"],
+      ["OFFICE_STAFF", "ESTIMATE_STATUS_UPDATE"],
+      ["DISPATCHER", "ESTIMATE_READ"],
+      ["SALES_REP", "ESTIMATE_READ"],
       ["CUSTOMER_PORTAL_USER", "CUSTOMER_READ"],
       ["CUSTOMER_PORTAL_USER", "JOB_READ"],
       ["CUSTOMER_PORTAL_USER", "SCHEDULE_READ"],
@@ -118,6 +124,17 @@ describe("role → permission defaults matrix", () => {
       ["SALES_REP", "INVOICE_UPDATE"],
       ["SALES_REP", "INVOICE_DELETE"],
       ["CUSTOMER_PORTAL_USER", "INVOICE_READ"],
+      ["DISPATCHER", "ESTIMATE_CREATE"],
+      ["DISPATCHER", "ESTIMATE_UPDATE"],
+      ["DISPATCHER", "ESTIMATE_DELETE"],
+      ["DISPATCHER", "ESTIMATE_STATUS_UPDATE"],
+      ["TECHNICIAN", "ESTIMATE_READ"],
+      ["OFFICE_STAFF", "ESTIMATE_DELETE"],
+      ["SALES_REP", "ESTIMATE_CREATE"],
+      ["SALES_REP", "ESTIMATE_UPDATE"],
+      ["SALES_REP", "ESTIMATE_DELETE"],
+      ["SALES_REP", "ESTIMATE_STATUS_UPDATE"],
+      ["CUSTOMER_PORTAL_USER", "ESTIMATE_READ"],
       ["CUSTOMER_PORTAL_USER", "MEMBERS_MANAGE"],
       ["CUSTOMER_PORTAL_USER", "LEAD_READ"],
       ["CUSTOMER_PORTAL_USER", "DASHBOARD_READ"],
@@ -149,6 +166,27 @@ describe("role → permission defaults matrix", () => {
     expect(DEFAULT_ROLE_PERMISSIONS.DISPATCHER).not.toContain("INVOICE_CREATE");
     expect(DEFAULT_ROLE_PERMISSIONS.TECHNICIAN.every((permission) => !permission.includes("INVOICE"))).toBe(true);
     expect(DEFAULT_ROLE_PERMISSIONS.CUSTOMER_PORTAL_USER.every((permission) => !permission.includes("INVOICE"))).toBe(true);
+  });
+  it("defines exactly five ESTIMATE_* permissions (Slice P2-2)", () => {
+    const estimatePermissions = ALL_PERMISSIONS.filter((permission) => permission.includes("ESTIMATE"));
+    expect(estimatePermissions).toEqual([
+      "ESTIMATE_READ",
+      "ESTIMATE_CREATE",
+      "ESTIMATE_UPDATE",
+      "ESTIMATE_DELETE",
+      "ESTIMATE_STATUS_UPDATE",
+    ]);
+  });
+  it("keeps ESTIMATE_DELETE to owner/admin and estimates read-only below office staff", () => {
+    for (const role of ["OWNER", "ADMIN"] as const) {
+      for (const permission of ["ESTIMATE_READ", "ESTIMATE_CREATE", "ESTIMATE_UPDATE", "ESTIMATE_DELETE", "ESTIMATE_STATUS_UPDATE"]) {
+        expect(DEFAULT_ROLE_PERMISSIONS[role]).toContain(permission);
+      }
+    }
+    expect(DEFAULT_ROLE_PERMISSIONS.OFFICE_STAFF).not.toContain("ESTIMATE_DELETE");
+    expect(DEFAULT_ROLE_PERMISSIONS.DISPATCHER).not.toContain("ESTIMATE_CREATE");
+    expect(DEFAULT_ROLE_PERMISSIONS.TECHNICIAN.every((permission) => !permission.includes("ESTIMATE"))).toBe(true);
+    expect(DEFAULT_ROLE_PERMISSIONS.CUSTOMER_PORTAL_USER.every((permission) => !permission.includes("ESTIMATE"))).toBe(true);
   });
 });
 
