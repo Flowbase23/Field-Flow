@@ -13,6 +13,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EstimateStatusControls } from "@/features/estimates/estimate-status-controls";
 import { ConvertToJobButton } from "@/features/estimates/convert-to-job-button";
+import { CopyCustomerLinkButton } from "@/features/portal/copy-customer-link-button";
 import { estimateStatusActions } from "@/features/estimates/estimate-ui";
 import { formatDateInTz } from "@/lib/dates";
 import { formatMoney } from "@/lib/money";
@@ -72,6 +73,13 @@ export default async function EstimateDetailPage({ params }: { params: Promise<{
       <CardContent><ConvertToJobButton estimateId={estimate.id} orgSlug={ctx.organization.slug} /></CardContent>
     </Card>}
     {estimate.status === "ACCEPTED" && !estimate.convertedJob && !canCreateJobs && <Card><CardContent className="text-sm text-muted-foreground">This estimate was accepted. A role with job-create permission can convert it into a work order.</CardContent></Card>}
+    {/* Customer portal link (P2-S4): the office reveals (or first-generates)
+        the tokenized no-login link on demand. Gated by ESTIMATE_UPDATE — the
+        same permission the edit button uses; the owner can override. */}
+    {canUpdate && <Card>
+      <CardHeader><CardTitle>Customer link</CardTitle><CardDescription>Share a private, no-login link so the customer can view this estimate and accept or decline it online. The link authorizes by a secret token — treat it like a password; anyone who has it can see this estimate.</CardDescription></CardHeader>
+      <CardContent><CopyCustomerLinkButton kind="estimate" id={estimate.id} /></CardContent>
+    </Card>}
     <div className="grid gap-6 md:grid-cols-2">
       <Card><CardHeader><CardTitle>Customer & job</CardTitle></CardHeader><CardContent className="space-y-3 text-sm">
         <p><span className="text-muted-foreground">Customer</span><br /><Link href={`/${ctx.organization.slug}/customers/${estimate.customer.id}`} className="font-medium text-primary hover:underline">{customerName}</Link></p>

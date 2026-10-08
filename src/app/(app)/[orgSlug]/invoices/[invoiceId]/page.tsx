@@ -14,6 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { InvoiceStatusControls } from "@/features/invoices/invoice-status-controls";
 import { invoiceStatusActions } from "@/features/invoices/invoice-ui";
 import { StripeCheckoutButton } from "@/features/payments/stripe-checkout-button";
+import { CopyCustomerLinkButton } from "@/features/portal/copy-customer-link-button";
 import { isStripeConfigured } from "@/server/stripe/adapter";
 import { paymentStatusLabel } from "@/server/domain/payment-status";
 import { formatDateInTz } from "@/lib/dates";
@@ -102,6 +103,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         {canCreatePayment && !isStripeConfigured() && invoice.balanceCents > 0 && <p className="text-xs text-muted-foreground">Online checkout activates once Stripe keys are added to the deployment secrets.</p>}
       </CardContent>
     </Card>
+    {/* Customer portal link (P2-S4): office reveals (or first-generates) the
+        tokenized no-login link on demand. Gated by INVOICE_UPDATE — the same
+        permission the edit button uses; the owner can override. */}
+    {canUpdate && <Card>
+      <CardHeader><CardTitle>Customer link</CardTitle><CardDescription>Share a private, no-login link so the customer can view this invoice and pay the outstanding balance by card online. The link authorizes by a secret token — treat it like a password; anyone who has it can see this invoice.</CardDescription></CardHeader>
+      <CardContent><CopyCustomerLinkButton kind="invoice" id={invoice.id} /></CardContent>
+    </Card>}
     <Card><CardHeader><CardTitle>Activity timestamps</CardTitle></CardHeader><CardContent><dl className="grid gap-3 text-sm sm:grid-cols-2">{timestamps.map(([label, date]) => <div key={label}><dt className="text-muted-foreground">{label}</dt><dd className="font-medium">{date ? formatDateInTz(date, ctx.organization.timezone, "medium") : "—"}</dd></div>)}</dl></CardContent></Card>
   </div>;
 }

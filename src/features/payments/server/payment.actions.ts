@@ -7,10 +7,10 @@
  */
 "use server";
 import { AuditAction, Permission } from "@prisma/client";
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { actionError, NotFoundError, type ActionResult } from "@/lib/errors";
 import { toAuditJson, writeAuditLog } from "@/server/audit";
+import { requestOrigin } from "@/server/http-origin";
 import { requirePermission } from "@/server/auth/require-org";
 import { db } from "@/server/db/client";
 import { createPaymentRepo } from "@/server/repositories/payment.repo";
@@ -111,15 +111,8 @@ function revalidatePayments(orgSlug: string, paymentId?: string, invoiceId?: str
  * The absolute origin the checkout must return to (Stripe requires absolute
  * URLs). Derived from the request's Host/x-forwarded headers — the same
  * server-side trust level the rest of the app uses; never client-supplied in
- * the payload.
+ * the payload. (Shared helper also used by the customer-portal checkout.)
  */
-async function requestOrigin(): Promise<string> {
-  const head = await headers();
-  const host = head.get("x-forwarded-host") ?? head.get("host");
-  if (!host) return "";
-  const proto = head.get("x-forwarded-proto") ?? (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
-  return `${proto}://${host}`;
-}
 
 /** Tenant-scoped read primitive. PAYMENT_READ is enforced independently of any UI. */
 export async function getPayment(input: unknown): Promise<ActionResult<PaymentDetailActionResult>> {
