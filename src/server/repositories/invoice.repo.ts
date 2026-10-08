@@ -28,6 +28,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import { ConflictError, NotFoundError } from "@/lib/errors";
+import { generatePortalToken } from "@/server/domain/portal-token";
 import { applyInvoiceStatusTransition, type InvoiceTransitionFields } from "@/server/domain/invoice-status";
 
 type Client = Prisma.TransactionClient | PrismaClient;
@@ -68,6 +69,12 @@ export interface InvoiceRepo {
   update(id: string, data: InvoiceUpdateData): Promise<Invoice>;
   /** Server-enforced transition; the only caller that writes Invoice.status. */
   setStatus(id: string, to: InvoiceStatus, options?: { now?: Date }): Promise<Invoice>;
+  /**
+   * Customer-portal token (P2-S4): generated once on demand, then stable, so
+   * copied links keep working. `generated` reports whether THIS call created
+   * the token (the only case the caller audits).
+   */
+  ensurePortalToken(id: string): Promise<{ invoice: Invoice; generated: boolean }>;
 }
 
 const customerSelect = { id: true, firstName: true, lastName: true, companyName: true } as const;
@@ -246,6 +253,21 @@ export function createInvoiceRepo(prisma: Client, organizationId: string): Invoi
       return isPrismaClient(prisma)
         ? prisma.$transaction((tx) => createInvoiceRepo(tx, organizationId).setStatus(id, to, options))
         : setStatusInTransaction(id, to, options);
+    },
+    async ensurePortalToken(id) {
+      const existing = await prisma.invoice.findFirst({ where: { id, ...tenant } });
+      if (!existing) throw new NotFoundError("Invoice not found in this organization.");
+      if (existing.portalToken) return { invoice: existing, generated: false };
+      // Guarded first-write: only succeeds when the token is still NULL. On a
+      // concurrent race the loser re-reads and returns the winner's token, so
+      // every caller observes the same (stable) value.
+      const update = await prisma.invoice.updateMany({
+        where: { id, ...tenant, portalToken: null },
+        data: { portalToken: generatePortalToken() },
+      });
+      const updated = await prisma.invoice.findFirst({ where: { id, ...tenant } });
+      if (!updated || !updated.portalToken) throw new NotFoundError("Invoice not found in this organization.");
+      return { invoice: updated, generated: update.count > 0 };
     },
   };
 }

@@ -3,10 +3,13 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 /**
  * Clerk middleware — route protection.
  *
- * Public routes: the app root, sign-in/sign-up, and the Clerk webhook receiver
- * (Clerk servers cannot carry a session cookie). Everything else requires an
- * authenticated session; org-scoped authorization is layered on top in
- * requireOrg()/requirePermission() (src/server/auth/require-org.ts).
+ * Public routes: the app root, sign-in/sign-up, the Clerk webhook receiver
+ * (Clerk servers cannot carry a session cookie), and the CUSTOMER PORTAL
+ * (P2-S4): /portal/* pages authorize purely by a high-entropy token in the URL
+ * (no customer accounts, no Clerk session — see
+ * src/features/portal/server/portal.actions.ts for the access model).
+ * Everything else requires an authenticated session; org-scoped authorization
+ * is layered on top in requireOrg()/requirePermission() (src/server/auth/require-org.ts).
  *
  * Note: Next.js 16 deprecates middleware.ts in favor of proxy.ts; this file
  * still works and is kept because the team's design names middleware.ts.
@@ -20,6 +23,7 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/webhooks/clerk(.*)",
+  "/portal(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {

@@ -552,6 +552,11 @@ model Invoice {
   issuedAt       DateTime?
   dueAt          DateTime?
   paidAt         DateTime?
+  // Customer portal link token (P2-S4). Same mechanism as Estimate.portalToken:
+  // globally-unique high-entropy token, generated on demand; the public
+  // /portal/invoice/[token] route authorizes by token alone and the checkout
+  // reuses the P2-3 payment flow against the server-read balance.
+  portalToken    String?       @unique
   subtotalCents  Int           @default(0)
   taxCents       Int           @default(0)
   totalCents     Int           @default(0)
@@ -590,6 +595,12 @@ model Estimate {
   sentAt         DateTime?
   acceptedAt     DateTime?
   declinedAt     DateTime?
+  // Customer portal link token (P2-S4). Globally-unique, high-entropy
+  // (256-bit base64url), generated ON DEMAND from the internal detail page —
+  // never at create time. Portal routes authorize purely by this token (see
+  // src/server/repositories/portal.repo.ts); office staff copy the link from
+  // the estimate detail UI. Nullable so existing rows migrate untouched.
+  portalToken    String?        @unique
   subtotalCents  Int            @default(0)
   taxCents       Int            @default(0)
   totalCents     Int            @default(0)

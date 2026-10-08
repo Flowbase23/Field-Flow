@@ -25,6 +25,7 @@ import {
   type PrismaClient,
 } from "@prisma/client";
 import { ConflictError, NotFoundError } from "@/lib/errors";
+import { generatePortalToken } from "@/server/domain/portal-token";
 import {
   applyEstimateStatusTransition,
   type EstimateDisplayStatus,
@@ -74,6 +75,12 @@ export interface EstimateRepo {
   update(id: string, data: EstimateUpdateData): Promise<Estimate>;
   /** Server-enforced transition; the only caller that writes Estimate.status. */
   setStatus(id: string, to: EstimateStatus, options?: { now?: Date }): Promise<Estimate>;
+  /**
+   * Customer-portal token (P2-S4): generated once on demand, then stable, so
+   * copied links keep working. `generated` reports whether THIS call created
+   * the token (the only case the caller audits).
+   */
+  ensurePortalToken(id: string): Promise<{ estimate: Estimate; generated: boolean }>;
 }
 
 const customerSelect = { id: true, firstName: true, lastName: true, companyName: true } as const;
@@ -256,6 +263,21 @@ export function createEstimateRepo(prisma: Client, organizationId: string): Esti
       return isPrismaClient(prisma)
         ? prisma.$transaction((tx) => createEstimateRepo(tx, organizationId).setStatus(id, to, options))
         : setStatusInTransaction(id, to, options);
+    },
+    async ensurePortalToken(id) {
+      const existing = await prisma.estimate.findFirst({ where: { id, ...tenant } });
+      if (!existing) throw new NotFoundError("Estimate not found in this organization.");
+      if (existing.portalToken) return { estimate: existing, generated: false };
+      // Guarded first-write: only succeeds when the token is still NULL. On a
+      // concurrent race the loser re-reads and returns the winner's token, so
+      // every caller observes the same (stable) value.
+      const update = await prisma.estimate.updateMany({
+        where: { id, ...tenant, portalToken: null },
+        data: { portalToken: generatePortalToken() },
+      });
+      const updated = await prisma.estimate.findFirst({ where: { id, ...tenant } });
+      if (!updated || !updated.portalToken) throw new NotFoundError("Estimate not found in this organization.");
+      return { estimate: updated, generated: update.count > 0 };
     },
   };
 }
