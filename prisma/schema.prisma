@@ -83,6 +83,11 @@ enum Permission {
   PAYMENT_CREATE
   PAYMENT_REFUND
   PAYMENT_VOID
+  // Phase 2 Slice P2-S5 — technician portal time entry. TIME_READ sees time
+  // entries; TIME_CREATE logs them. Technician self-scoping (own rows only)
+  // is enforced in the repositories, not by extra permissions.
+  TIME_READ
+  TIME_CREATE
 }
 
 enum CustomerType {

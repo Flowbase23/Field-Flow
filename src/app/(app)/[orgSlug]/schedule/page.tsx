@@ -1,4 +1,5 @@
 import { Permission } from "@prisma/client";
+import { redirect } from "next/navigation";
 import { requirePermission } from "@/server/auth/require-org";
 import { permissionsFor } from "@/server/auth/permissions";
 import { tenantDb } from "@/server/db/tenant-db";
@@ -14,6 +15,11 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default async function SchedulePage({ searchParams }: { searchParams: Promise<{ view?: string; date?: string; tech?: string; jobId?: string }> }) {
   const ctx = await requirePermission(Permission.SCHEDULE_READ);
+  // P2-S5: technicians get their OWN schedule (my-schedule) — the org-wide
+  // calendar would expose other technicians' appointments.
+  if (ctx.membership.role === "TECHNICIAN") {
+    redirect(`/${ctx.organization.slug}/my-schedule`);
+  }
   const permissions = await permissionsFor(ctx.organizationId, ctx.membership.role);
   const sp = await searchParams;
   const timezone = ctx.organization.timezone;

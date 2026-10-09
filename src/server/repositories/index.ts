@@ -16,6 +16,7 @@ import { createInvoiceRepo, type InvoiceRepo } from "./invoice.repo";
 import { createEstimateRepo, type EstimateRepo } from "./estimate.repo";
 import { createPaymentRepo, type PaymentRepo } from "./payment.repo";
 import { createJobRepo, type JobRepo } from "./job.repo";
+import { createTimeEntryRepo, type TimeEntryRepo } from "./time-entry.repo";
 type Client = Prisma.TransactionClient | PrismaClient;
 export interface TenantRepositories {
   memberships: MembershipRepo; // Slice 2 — settings/members mutations
@@ -28,6 +29,7 @@ export interface TenantRepositories {
   invoices: InvoiceRepo; // Phase 2 Slice P2-1 — invoicing
   estimates: EstimateRepo; // Phase 2 Slice P2-2 — estimates
   payments: PaymentRepo; // Phase 2 Slice P2-3 — payments ledger
+  timeEntries: TimeEntryRepo; // Phase 2 Slice P2-S5 — technician time entry
 }
 export function tenantRepositories(
   prisma: Client,
@@ -44,5 +46,6 @@ export function tenantRepositories(
     invoices: createInvoiceRepo(prisma, organizationId),
     estimates: createEstimateRepo(prisma, organizationId),
     payments: createPaymentRepo(prisma, organizationId),
+    timeEntries: createTimeEntryRepo(prisma, organizationId),
   };
 }
