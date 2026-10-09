@@ -54,6 +54,8 @@ export const ALL_PERMISSIONS: readonly Permission[] = [
   "PAYMENT_CREATE",
   "PAYMENT_REFUND",
   "PAYMENT_VOID",
+  "TIME_READ",
+  "TIME_CREATE",
 ];
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
@@ -78,9 +80,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "PAYMENT_READ",
   ],
 
-  // Technician: sees their own jobs/schedule and reports status.
-  // (Data scoping to "own records" is enforced in the repositories, Slice 4/5.)
-  TECHNICIAN: ["JOB_READ", "JOB_STATUS_UPDATE", "SCHEDULE_READ"],
+  // Technician: sees their own jobs/schedule and reports status. The
+  // technician portal (P2-S5) also lets them read + log their own time entries.
+  // (Data scoping to "own records" is enforced in the repositories.)
+  TECHNICIAN: ["JOB_READ", "JOB_STATUS_UPDATE", "SCHEDULE_READ", "TIME_READ", "TIME_CREATE"],
 
   // Office staff: CRM read/write, jobs read/write, scheduling read, and the
   // day-to-day invoicing desk (no invoice deletion — that stays owner/admin).
@@ -110,6 +113,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     // Refund/void stay owner/admin (money-moving corrections).
     "PAYMENT_READ",
     "PAYMENT_CREATE",
+    // Office staff can read the timesheet (TIME_CREATE stays with the
+    // technician and owner/admin for now — owner-overridable).
+    "TIME_READ",
   ],
 
   // Sales reps: work leads, read customers. They can read invoices and
