@@ -30,6 +30,14 @@ export interface TechnicianRepo {
   getById(id: string): Promise<TechnicianWithUser | null>;
   /** Tenant-scoped batch lookup (used to validate technicianIds on create/update). */
   listByIds(ids: string[]): Promise<TechnicianWithUser[]>;
+  /**
+   * The Technician record for a local User in this org, or null when the user
+   * is not set up as a technician (e.g. office staff). Unique
+   * (organizationId, userId) — this is how the technician portal resolves the
+   * signed-in user to "their own" technician id; the userId comes from
+   * requireOrg()'s OrgContext, never from the browser.
+   */
+  getByUserId(userId: string): Promise<TechnicianWithUser | null>;
 }
 
 type Client = Prisma.TransactionClient | PrismaClient;
@@ -64,6 +72,13 @@ export function createTechnicianRepo(prisma: Client, organizationId: string): Te
       if (ids.length === 0) return [];
       return prisma.technician.findMany({
         where: { id: { in: ids }, ...tenant },
+        include: { user: { select: userSelect } },
+      });
+    },
+
+    async getByUserId(userId) {
+      return prisma.technician.findFirst({
+        where: { ...tenant, userId },
         include: { user: { select: userSelect } },
       });
     },

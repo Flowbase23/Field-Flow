@@ -75,6 +75,17 @@ export interface JobRepo {
   count(params?: Omit<JobListParams, "page" | "pageSize">): Promise<number>;
   getById(id: string): Promise<Job | null>;
   getDetail(id: string): Promise<JobDetail | null>;
+  /**
+   * Technician-portal scoping (P2-S5): the jobs ASSIGNED to one technician
+   * (JobTechnician join), newest first. Passing a foreign/off-tenant
+   * technicianId simply yields an empty list — nothing outside the join leaks.
+   */
+  listForTechnician(technicianId: string): Promise<JobListItem[]>;
+  /**
+   * Technician-portal detail guard: the job detail ONLY when the technician is
+   * assigned to it (and it is in this tenant); otherwise null → notFound.
+   */
+  getDetailForTechnician(id: string, technicianId: string): Promise<JobDetail | null>;
   /** Active tenant technicians eligible for assignment. */
   listEligibleTechnicians(): Promise<EligibleJobTechnician[]>;
   create(data: JobCreateData): Promise<Job>;
@@ -237,6 +248,19 @@ export function createJobRepo(prisma: Client, organizationId: string): JobRepo {
     },
     async listEligibleTechnicians() {
       return prisma.technician.findMany({ where: { ...tenant, isActive: true }, select: { id: true, isActive: true, employeeCode: true, user: { select: technicianUserSelect } }, orderBy: [{ user: { firstName: "asc" } }, { user: { lastName: "asc" } }] });
+    },
+    async listForTechnician(technicianId) {
+      return prisma.job.findMany({
+        where: { ...tenant, technicians: { some: { technicianId } } },
+        include: { customer: { select: { id: true, firstName: true, lastName: true, companyName: true } }, location: { select: { id: true, label: true, address1: true, city: true, state: true, postalCode: true } } },
+        orderBy: [{ updatedAt: "desc" }],
+      });
+    },
+    async getDetailForTechnician(id, technicianId) {
+      return prisma.job.findFirst({
+        where: { ...tenant, id, technicians: { some: { technicianId } } },
+        include: { customer: { select: { id: true, firstName: true, lastName: true, companyName: true } }, location: { select: { id: true, label: true, address1: true, city: true, state: true, postalCode: true } }, lead: { select: { id: true, title: true } }, technicians: { include: { technician: { select: { id: true, isActive: true, employeeCode: true, user: { select: technicianUserSelect } } } }, orderBy: [{ isPrimary: "desc" }, { assignedAt: "asc" }] } },
+      });
     },
     async create(data) { return isPrismaClient(prisma) ? prisma.$transaction((tx) => createJobRepo(tx, organizationId).create(data)) : createInTransaction(data); },
     async createFromEstimate(estimateId) { return isPrismaClient(prisma) ? prisma.$transaction((tx) => createJobRepo(tx, organizationId).createFromEstimate(estimateId)) : createFromEstimateInTransaction(estimateId); },

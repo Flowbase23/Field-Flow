@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { Permission } from "@prisma/client";
 import { requirePermission } from "@/server/auth/require-org";
 import { permissionsFor } from "@/server/auth/permissions";
@@ -15,6 +16,11 @@ const PAGE_SIZE = 25;
 
 export default async function JobsPage({ searchParams }: { searchParams: Promise<{ status?: string; priority?: string; page?: string }> }) {
   const ctx = await requirePermission(Permission.JOB_READ);
+  // P2-S5: technicians get their OWN jobs (my-jobs) — the org-wide job desk
+  // would expose jobs assigned to other technicians.
+  if (ctx.membership.role === "TECHNICIAN") {
+    redirect(`/${ctx.organization.slug}/my-jobs`);
+  }
   const permissions = await permissionsFor(ctx.organizationId, ctx.membership.role);
   const sp = await searchParams;
   const filters = parseJobListFilters(sp);
